@@ -8,9 +8,11 @@ use crate::resolver::{AuthData, Endpoint};
 use crate::webc::{WebResponse, WebStream};
 use crate::{Error, Headers, Result};
 use crate::{ModelIden, ServiceTarget};
+use crate::{Model};
 use reqwest::RequestBuilder;
 use serde_json::{Value, json};
 use value_ext::JsonValueExt;
+use crate::adapter::ModelCapabilities;
 
 pub struct CohereAdapter;
 
@@ -42,6 +44,37 @@ impl Adapter for CohereAdapter {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 
+	async fn all_models(_kind: AdapterKind, _target: ServiceTarget) -> Result<Vec<Model>> {
+		// 为 Cohere 模型创建基本的模型信息
+		let mut models = Vec::new();
+		
+		for &model_id in MODELS {
+			let model_name: crate::ModelName = model_id.into();
+			let mut model = Model::new(model_name, model_id);
+			
+			// 设置 Cohere 模型的通用特性
+			let (max_input_tokens, max_output_tokens) = ModelCapabilities::infer_token_limits(AdapterKind::Cohere, model_id);
+			model = model
+				.with_max_input_tokens(max_input_tokens)
+				.with_max_output_tokens(max_output_tokens)
+				.with_streaming(ModelCapabilities::supports_streaming(AdapterKind::Cohere, model_id))
+				.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Cohere, model_id))
+				.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Cohere, model_id));
+			
+			// 设置输入输出模态 (Cohere 主要是文本模型)
+			let input_modalities = ModelCapabilities::infer_input_modalities(AdapterKind::Cohere, model_id);
+			let output_modalities = ModelCapabilities::infer_output_modalities(AdapterKind::Cohere, model_id);
+			
+			model = model
+				.with_input_modalities(input_modalities)
+				.with_output_modalities(output_modalities);
+			
+			models.push(model);
+		}
+		
+		Ok(models)
+	}
+
 	fn get_service_url(_model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> String {
 		let base_url = endpoint.base_url();
 		match service_type {
@@ -51,6 +84,7 @@ impl Adapter for CohereAdapter {
 				let base_without_version = base_url.trim_end_matches("v1/");
 				format!("{base_without_version}v2/embed")
 			}
+			ServiceType::Models => format!("{base_url}models"),
 		}
 	}
 

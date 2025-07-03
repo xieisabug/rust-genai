@@ -118,4 +118,9 @@ async fn test_list_models() -> Result<()> {
 	common_tests::common_test_list_models(AdapterKind::Gemini, "gemini-2.5-pro").await
 }
 
+#[tokio::test]
+async fn test_all_models() -> Result<()> {
+	common_tests::common_test_all_models(AdapterKind::Gemini, "gemini-2.5-flash").await
+}
+
 // endregion: --- List

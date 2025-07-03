@@ -4,8 +4,9 @@ use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse};
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
-use crate::{Result, ServiceTarget};
+use crate::{Result, ServiceTarget, Model};
 use reqwest::RequestBuilder;
+use crate::adapter::ModelCapabilities;
 
 pub struct NebiusAdapter;
 
@@ -60,6 +61,38 @@ impl Adapter for NebiusAdapter {
 
 	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
+	}
+
+	async fn all_models(_kind: AdapterKind, _target: ServiceTarget) -> Result<Vec<Model>> {
+		// 为 Nebius 模型创建基本的模型信息
+		let mut models = Vec::new();
+		
+		for &model_id in MODELS {
+			let model_name: crate::ModelName = model_id.into();
+			let mut model = Model::new(model_name, model_id);
+			
+			// 设置 Nebius 模型的基本特性
+			let (max_input_tokens, max_output_tokens) = ModelCapabilities::infer_token_limits(AdapterKind::Nebius, model_id);
+			
+			model = model
+				.with_max_input_tokens(max_input_tokens)
+				.with_max_output_tokens(max_output_tokens)
+				.with_streaming(ModelCapabilities::supports_streaming(AdapterKind::Nebius, model_id))
+				.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Nebius, model_id))
+				.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Nebius, model_id));
+			
+			// 设置输入输出模态
+			let input_modalities = ModelCapabilities::infer_input_modalities(AdapterKind::Nebius, model_id);
+			let output_modalities = ModelCapabilities::infer_output_modalities(AdapterKind::Nebius, model_id);
+			
+			model = model
+				.with_input_modalities(input_modalities)
+				.with_output_modalities(output_modalities);
+			
+			models.push(model);
+		}
+		
+		Ok(models)
 	}
 
 	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> String {

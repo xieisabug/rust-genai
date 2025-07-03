@@ -8,10 +8,11 @@ use crate::chat::{
 };
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::{WebResponse, WebStream};
-use crate::{Error, Headers, ModelIden, Result, ServiceTarget};
+use crate::{Error, Headers, Model, ModelIden, Result, ServiceTarget};
 use reqwest::RequestBuilder;
 use serde_json::{Value, json};
 use value_ext::JsonValueExt;
+use crate::adapter::ModelCapabilities;
 
 pub struct GeminiAdapter;
 
@@ -53,6 +54,46 @@ impl Adapter for GeminiAdapter {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 
+	async fn all_models(_kind: AdapterKind, _target: ServiceTarget) -> Result<Vec<Model>> {
+		// 为 Gemini 模型创建基本的模型信息
+		let mut models = Vec::new();
+		
+		for &model_id in MODELS {
+			let model_name: crate::ModelName = model_id.into();
+			let mut model = Model::new(model_name, model_id);
+			
+			// 设置 Gemini 模型的特性
+			let (max_input_tokens, max_output_tokens) = ModelCapabilities::infer_token_limits(AdapterKind::Gemini, model_id);
+			let supports_reasoning = ModelCapabilities::supports_reasoning(AdapterKind::Gemini, model_id);
+			
+			model = model
+				.with_max_input_tokens(max_input_tokens)
+				.with_max_output_tokens(max_output_tokens)
+				.with_streaming(ModelCapabilities::supports_streaming(AdapterKind::Gemini, model_id))
+				.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Gemini, model_id))
+				.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Gemini, model_id))
+				.with_reasoning(supports_reasoning);
+			
+			// 设置输入输出模态
+			let input_modalities = ModelCapabilities::infer_input_modalities(AdapterKind::Gemini, model_id);
+			let output_modalities = ModelCapabilities::infer_output_modalities(AdapterKind::Gemini, model_id);
+			
+			model = model
+				.with_input_modalities(input_modalities)
+				.with_output_modalities(output_modalities);
+			
+			// 如果支持推理，设置推理努力等级
+			if supports_reasoning {
+				let reasoning_efforts = ModelCapabilities::infer_reasoning_efforts(AdapterKind::Gemini, model_id);
+				model = model.with_reasoning_efforts(reasoning_efforts);
+			}
+			
+			models.push(model);
+		}
+		
+		Ok(models)
+	}
+
 	/// NOTE: As Google Gemini has decided to put their API_KEY in the URL,
 	///       this will return the URL without the API_KEY in it. The API_KEY will need to be added by the caller.
 	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> String {
@@ -62,6 +103,7 @@ impl Adapter for GeminiAdapter {
 			ServiceType::Chat => format!("{base_url}models/{model_name}:generateContent"),
 			ServiceType::ChatStream => format!("{base_url}models/{model_name}:streamGenerateContent"),
 			ServiceType::Embed => format!("{base_url}models/{model_name}:embedContent"), // Gemini embeddings API
+			ServiceType::Models => format!("{base_url}models"),
 		}
 	}
 

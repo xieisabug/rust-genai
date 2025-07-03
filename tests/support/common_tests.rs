@@ -10,8 +10,8 @@ use genai::chat::{
 	ToolResponse,
 };
 use genai::embed::EmbedOptions;
-use genai::resolver::{AuthData, AuthResolver, AuthResolverFn, IntoAuthResolverFn};
-use genai::{Client, ClientConfig, ModelIden};
+use genai::resolver::{AuthData, AuthResolver, AuthResolverFn, IntoAuthResolverFn, ServiceTargetResolver};
+use genai::{Client, ClientConfig, ModelIden, ServiceTarget};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use value_ext::JsonValueExt;
@@ -717,6 +717,58 @@ pub async fn common_test_list_models(adapter_kind: AdapterKind, contains: &str) 
 
 	// -- Check
 	assert_contains(&models, contains);
+
+	Ok(())
+}
+
+pub async fn common_test_all_models(adapter_kind: AdapterKind, expected_model_name: &str) -> Result<()> {
+	// -- Build the new client with this adapter_config
+	let client = Client::builder().build();
+
+	// -- Exec
+	let models = client.all_models(adapter_kind).await?;
+
+	// -- Check
+	assert!(!models.is_empty(), "Should have at least one model");
+
+	// Check that we can find the expected model
+	let found_model = models.iter().find(|model| &*model.name == expected_model_name);
+	assert!(
+		found_model.is_some(),
+		"Should contain model '{}' in the models list. Available models: {:?}",
+		expected_model_name,
+		models.iter().map(|m| &*m.name).collect::<Vec<_>>()
+	);
+
+	// Check the found model has basic properties
+	let model = found_model.unwrap();
+	assert!(!model.id.is_empty(), "Model ID should not be empty");
+	assert!(!model.name.is_empty(), "Model name should not be empty");
+
+	// Check that text is in supported input modalities
+	use genai::Modality;
+	assert!(
+		model.supported_input_modalities.contains(&Modality::Text),
+		"Model should support text input modality"
+	);
+
+	// Check that text is in supported output modalities  
+	assert!(
+		model.supported_output_modalities.contains(&Modality::Text),
+		"Model should support text output modality"
+	);
+
+	println!("✅ Model '{}' validation passed:", model.name);
+	println!("   ID: {}", model.id);
+	println!("   Supports tool calls: {}", model.supports_tool_calls);
+	println!("   Supports streaming: {}", model.supports_streaming);
+	println!("   Supports JSON mode: {}", model.supports_json_mode);
+	if let Some(input_tokens) = model.max_input_tokens {
+		println!("   Max input tokens: {}", input_tokens);
+	}
+	if let Some(output_tokens) = model.max_output_tokens {
+		println!("   Max output tokens: {}", output_tokens);
+	}
 
 	Ok(())
 }

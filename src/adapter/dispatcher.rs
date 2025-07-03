@@ -1,4 +1,4 @@
-use crate::ModelIden;
+use crate::{Model, ModelIden};
 use crate::adapter::anthropic::AnthropicAdapter;
 use crate::adapter::cohere::CohereAdapter;
 use crate::adapter::gemini::GeminiAdapter;
@@ -68,6 +68,20 @@ impl AdapterDispatcher {
 			AdapterKind::Xai => XaiAdapter::all_model_names(kind).await,
 			AdapterKind::DeepSeek => DeepSeekAdapter::all_model_names(kind).await,
 			AdapterKind::Zhipu => ZhipuAdapter::all_model_names(kind).await,
+		}
+	}
+
+	pub async fn all_models(kind: AdapterKind, target: ServiceTarget) -> Result<Vec<Model>> {
+		match kind {
+			AdapterKind::OpenAI => OpenAIAdapter::all_models(kind, target).await,
+			AdapterKind::Anthropic => AnthropicAdapter::all_models(kind, target).await,
+			AdapterKind::Cohere => CohereAdapter::all_models(kind, target).await,
+			AdapterKind::Ollama => OllamaAdapter::all_models(kind, target).await,
+			AdapterKind::Gemini => GeminiAdapter::all_models(kind, target).await,
+			AdapterKind::Groq => GroqAdapter::all_models(kind, target).await,
+			AdapterKind::Nebius => NebiusAdapter::all_models(kind, target).await,
+			AdapterKind::Xai => XaiAdapter::all_models(kind, target).await,
+			AdapterKind::DeepSeek => DeepSeekAdapter::all_models(kind, target).await,
 		}
 	}
 

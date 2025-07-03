@@ -2,7 +2,7 @@ use crate::adapter::{AdapterDispatcher, AdapterKind, ServiceType, WebRequestData
 use crate::chat::{ChatOptions, ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse};
 use crate::embed::{EmbedOptions, EmbedOptionsSet, EmbedRequest, EmbedResponse};
 use crate::resolver::AuthData;
-use crate::{Client, Error, ModelIden, Result, ServiceTarget};
+use crate::{Client, Error, Model, ModelIden, Result, ServiceTarget};
 
 /// Public AI Functions
 impl Client {
@@ -19,6 +19,12 @@ impl Client {
 	///   that will take a list of skills like (`ChatText`, `ChatImage`, `ChatFunction`, `TextToSpeech`, ...).
 	pub async fn all_model_names(&self, adapter_kind: AdapterKind) -> Result<Vec<String>> {
 		let models = AdapterDispatcher::all_model_names(adapter_kind).await?;
+		Ok(models)
+	}
+
+	pub async fn all_models(&self, adapter_kind: AdapterKind) -> Result<Vec<Model>> {
+		let target = self.config().resolve_service_target_without_model(adapter_kind).await?;
+		let models = AdapterDispatcher::all_models(adapter_kind, target).await?;
 		Ok(models)
 	}
 
@@ -41,6 +47,10 @@ impl Client {
 	pub async fn resolve_service_target(&self, model_name: &str) -> Result<ServiceTarget> {
 		let model = self.default_model(model_name)?;
 		self.config().resolve_service_target(model).await
+	}
+
+	pub async fn resolve_service_target_without_model(&self, adapter_kind: AdapterKind) -> Result<ServiceTarget> {
+		self.config().resolve_service_target_without_model(adapter_kind).await
 	}
 
 	/// Executes a chat.

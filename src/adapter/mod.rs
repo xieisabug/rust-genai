@@ -13,6 +13,7 @@ mod adapter_kind;
 mod adapter_types;
 mod adapters;
 mod dispatcher;
+mod model_capabilities;
 
 // -- Flatten (private, crate, public)
 use adapters::*;
@@ -24,5 +25,7 @@ pub use adapter_kind::*;
 
 // -- Crate modules
 pub(crate) mod inter_stream;
+
+pub(crate) use model_capabilities::*;
 
 // endregion: --- Modules
