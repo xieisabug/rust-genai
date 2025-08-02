@@ -6,9 +6,10 @@ use genai::resolver::AuthData;
 
 type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>; // For tests.
 
-const MODEL: &str = "glm-4-plus";
-const MODEL_NS: &str = "zhipu::glm-4-plus";
-const MODEL_V: &str = "glm-4v-flash"; // Visual language model does not support function calling
+// Updated model references to use official models from Zhipu docs
+const MODEL: &str = "glm-4.5-air";     // Cost-effective model for general testing
+const MODEL_NS: &str = "zhipu::glm-4.5-air";
+const MODEL_V: &str = "glm-4v-flash";   // Visual language model does not support function calling
 
 // region:    --- Chat
 
@@ -117,7 +118,12 @@ async fn test_resolver_auth_ok() -> Result<()> {
 
 #[tokio::test]
 async fn test_list_models() -> Result<()> {
-	common_tests::common_test_list_models(AdapterKind::Zhipu, "glm-4-plus").await
+	common_tests::common_test_list_models(AdapterKind::Zhipu, "glm-4.5").await
+}
+
+#[tokio::test] 
+async fn test_all_models() -> Result<()> {
+	common_tests::common_test_all_models(AdapterKind::Zhipu, "glm-4.5").await
 }
 
 // endregion: --- List

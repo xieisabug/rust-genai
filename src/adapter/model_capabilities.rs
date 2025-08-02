@@ -172,6 +172,10 @@ impl ModelCapabilities {
 				model_id == "grok-3-mini" || 
 				model_id == "grok-3-mini-fast"
 			),
+			AdapterKind::Zhipu => Some(
+				// Zhipu thinking models support reasoning according to official docs
+				model_id.contains("glm-4.5") && !model_id.contains("air")
+			),
 			_ => None,
 		}
 	}
@@ -224,6 +228,14 @@ impl ModelCapabilities {
 				// Only grok-4-0709 and grok-2-vision-1212 support image input
 				if model_id == "grok-4-0709" || 
 				   model_id.contains("grok-2-vision-1212") {
+					set.insert(Modality::Image);
+				}
+				Some(set)
+			}
+			AdapterKind::Zhipu => {
+				let mut set = HashSet::from([Modality::Text]);
+				// Zhipu vision models support image input (verified from official docs 2025)
+				if model_id.contains("4v") || model_id.contains("vision") {
 					set.insert(Modality::Image);
 				}
 				Some(set)
@@ -284,6 +296,16 @@ impl ModelCapabilities {
 						ReasoningEffortType::Medium,
 						ReasoningEffortType::High,
 						ReasoningEffortType::Budget,
+					])
+				} else {
+					None
+				}
+			},
+			AdapterKind::Zhipu => {
+				// Zhipu thinking models support effort control (verified from official docs 2025)
+				if model_id.contains("glm-4.5") && !model_id.contains("air") {
+					Some(vec![
+						ReasoningEffortType::High,
 					])
 				} else {
 					None
@@ -504,9 +526,38 @@ impl ModelCapabilities {
 		Some((Some(32_768), Some(8_192)))
 	}
 
-	fn zhipu_token_limits(_model_id: &str) -> Option<(Option<u32>, Option<u32>)> {
-		// Zhipu does not expose specific per-model limits publicly; use broad defaults.
-		Some((Some(128_000), Some(8_192)))
+	fn zhipu_token_limits(model_id: &str) -> Option<(Option<u32>, Option<u32>)> {
+		let res = match model_id {
+			// --- GLM-4.5 Series (verified from official docs 2025) ---
+			"glm-4.5" => (Some(128_000), Some(32_768)),        // 128K context, estimate 32K output
+			"glm-4.5-x" => (Some(128_000), Some(32_768)),      // 128K context, estimate 32K output
+			"glm-4.5-air" => (Some(128_000), Some(16_384)),    // 128K context, estimate 16K output (lightweight)
+			"glm-4.5-airx" => (Some(128_000), Some(16_384)),   // 128K context, estimate 16K output (lightweight)
+			"glm-4.5-flash" => (Some(128_000), Some(8_192)),   // 128K context, estimate 8K output (free tier)
+			
+			// --- GLM-4-32B Series ---
+			"glm-4-32b-0414-128k" => (Some(128_000), Some(32_768)), // 128K context, estimate 32K output
+			
+			// --- Legacy GLM-4 Series (maintaining existing configs) ---
+			id if id.starts_with("glm-4-plus") => (Some(128_000), Some(32_768)),
+			id if id.starts_with("glm-4-air") => (Some(128_000), Some(16_384)),
+			id if id.starts_with("glm-4-flash") => (Some(128_000), Some(8_192)),
+			id if id.starts_with("glm-4-long") => (Some(1_000_000), Some(32_768)), // Long context model
+			
+			// --- Vision Models ---
+			id if id.contains("4v") => (Some(128_000), Some(16_384)), // Vision models
+			
+			// --- Other Models ---
+			id if id.starts_with("glm-z1") => (Some(128_000), Some(16_384)),
+			id if id.contains("thinking") => (Some(128_000), Some(32_768)), // Thinking models
+			
+			// --- Generic fallback ---
+			id if id.starts_with("glm-4") => (Some(128_000), Some(16_384)),
+			id if id.starts_with("glm") => (Some(128_000), Some(8_192)),
+			
+			_ => return None,
+		};
+		Some(res)
 	}
 
 	// ---------- ORIGINAL OPENAI HELPERS (kept public for fallback) ----------
