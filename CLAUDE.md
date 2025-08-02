@@ -17,6 +17,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `cargo check` - Fast syntax and type checking without compilation
 - `cargo fmt` - Format code using rustfmt (uses custom config in rustfmt.toml)
 - `cargo clippy` - Run linter
+- 编写完后记得用cargo check来确认代码编写是否正确
 
 ### Running Examples
 - `cargo run --example c00-readme` - Run the main example demonstrating multi-provider usage
