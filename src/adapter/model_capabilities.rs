@@ -68,6 +68,7 @@ impl ModelCapabilities {
 	pub fn supports_tool_calls(kind: AdapterKind, model_id: &str) -> bool {
 		match kind {
 			AdapterKind::OpenAI => Self::openai_supports_tool_calls(model_id),
+			AdapterKind::Cohere => Self::cohere_supports_tool_calls(model_id),
 			_ => true,
 		}
 	}
@@ -142,7 +143,8 @@ impl ModelCapabilities {
 	fn provider_supports_json_mode(kind: AdapterKind, model_id: &str) -> Option<bool> {
 		match kind {
 			AdapterKind::OpenAI => Some(Self::openai_supports_json_mode(model_id)),
-			AdapterKind::Anthropic | AdapterKind::Cohere | AdapterKind::Gemini => Some(false),
+			AdapterKind::Cohere => Some(Self::cohere_supports_json_mode(model_id)),
+			AdapterKind::Anthropic | AdapterKind::Gemini => Some(false),
 			AdapterKind::DeepSeek
 			| AdapterKind::Groq
 			| AdapterKind::Xai
@@ -172,6 +174,14 @@ impl ModelCapabilities {
 				if model_id.contains("claude-3") || model_id.contains("claude-4") 
 					|| model_id.contains("claude-opus-4") || model_id.contains("claude-sonnet-4")
 					|| model_id.contains("claude-2.1") {
+					set.insert(Modality::Image);
+				}
+				Some(set)
+			}
+			AdapterKind::Cohere => {
+				let mut set = HashSet::from([Modality::Text]);
+				// Vision models support image input
+				if model_id.contains("vision") || model_id.contains("aya-vision") {
 					set.insert(Modality::Image);
 				}
 				Some(set)
@@ -290,10 +300,24 @@ impl ModelCapabilities {
 
 	fn cohere_token_limits(model_id: &str) -> Option<(Option<u32>, Option<u32>)> {
 		let res = match model_id {
+			// Aya series - High-performance multilingual models
+			id if id.contains("aya-vision-32b") => (Some(128_000), Some(8_192)),
+			id if id.contains("aya-vision-8b") => (Some(128_000), Some(4_096)),
+			id if id.contains("aya-expanse-32b") => (Some(128_000), Some(8_192)),
+			id if id.contains("aya-expanse-8b") => (Some(128_000), Some(4_096)),
+			
+			// Command A series
+			id if id.contains("command-a-vision") => (Some(128_000), Some(4_096)),
+			id if id.contains("command-a") => (Some(128_000), Some(4_096)),
+			
+			// Command R series (latest versions with improved performance)
 			id if id.contains("command-r-plus") => (Some(128_000), Some(4_096)),
+			id if id.contains("command-r7b") => (Some(128_000), Some(4_096)),
 			id if id.contains("command-r") => (Some(128_000), Some(4_096)),
+			
+			// Legacy Command series
 			id if id.contains("command-light") => (Some(4_096), Some(4_096)),
-			id if id.contains("command-light-nightly") => (Some(4_096), Some(4_096)),
+			id if id.contains("command-nightly") => (Some(4_096), Some(4_096)),
 			id if id.contains("command") => (Some(4_096), Some(4_096)),
 			_ => return None,
 		};
@@ -460,6 +484,30 @@ impl ModelCapabilities {
 			]
 		} else {
 			vec![]
+		}
+	}
+
+	// ---------- COHERE SPECIFIC HELPERS ----------
+
+	/// Cohere models that support tool calls
+	fn cohere_supports_tool_calls(model_id: &str) -> bool {
+		// Command R and Command R+ series support tool calls
+		// Command A series also supports tool calls
+		// Aya series models support tool calls
+		model_id.contains("command-r") 
+			|| model_id.contains("command-a")
+			|| model_id.contains("command-nightly")
+			|| model_id.contains("aya-")
+	}
+
+	/// Cohere models that support JSON mode
+	fn cohere_supports_json_mode(model_id: &str) -> bool {
+		// Most modern Cohere models support JSON mode
+		// Exclude very basic/light models, but include Aya series
+		if model_id.contains("aya-") {
+			true
+		} else {
+			!model_id.contains("command-light")
 		}
 	}
 }

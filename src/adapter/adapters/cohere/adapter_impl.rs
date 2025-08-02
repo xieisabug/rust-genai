@@ -17,8 +17,24 @@ use crate::adapter::ModelCapabilities;
 pub struct CohereAdapter;
 
 const MODELS: &[&str] = &[
+	// Aya series - Multilingual models
+	"aya-vision-8b",
+	"aya-vision-32b",
+	"aya-expanse-8b", 
+	"aya-expanse-32b",
+	
+	// Latest Command A series
+	"command-a",
+	"command-a-vision",
+	
+	// Command R series with latest versions
 	"command-r-plus",
+	"command-r-plus-08-2024",
 	"command-r",
+	"command-r-08-2024", 
+	"command-r7b",
+	
+	// Legacy Command series
 	"command",
 	"command-nightly",
 	"command-light",
@@ -44,26 +60,61 @@ impl Adapter for CohereAdapter {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 
-	async fn all_models(_kind: AdapterKind, _target: ServiceTarget) -> Result<Vec<Model>> {
-		// 为 Cohere 模型创建基本的模型信息
-		let mut models = Vec::new();
-		
-		for &model_id in MODELS {
-			let model_name: crate::ModelName = model_id.into();
-			let mut model = Model::new(model_name, model_id);
+	async fn all_models(kind: AdapterKind, target: ServiceTarget) -> Result<Vec<Model>> {
+		// 使用默认的认证和端点配置
+		let auth = target.auth;
+		let endpoint = target.endpoint;
+
+		// 构建一个临时的 ModelIden 用于获取服务 URL
+		let model_iden = ModelIden::new(kind, "temp");
+
+		// 获取 models API 的 URL
+		let url = Self::get_service_url(&model_iden, ServiceType::Models, endpoint);
+
+		// 获取 API key
+		let api_key = get_api_key(auth, &model_iden)?;
+
+		// 构建请求头
+		let headers = vec![(String::from("Authorization"), format!("Bearer {api_key}"))];
+
+		// 创建 WebClient 并发送请求
+		let web_client = crate::webc::WebClient::default();
+		let web_response = web_client
+			.do_get(&url, &headers)
+			.await
+			.map_err(|webc_error| Error::WebAdapterCall {
+				adapter_kind: kind,
+				webc_error,
+			})?;
+
+		// 解析响应并创建模型列表
+		let mut models: Vec<Model> = Vec::new();
+
+		// 如果API调用失败，回退到硬编码的模型列表
+		let model_ids: Vec<String> = if let Ok(api_models) = Self::parse_models_response(web_response) {
+			api_models
+		} else {
+			// 回退到硬编码模型列表
+			MODELS.iter().map(|s| s.to_string()).collect()
+		};
+
+		// 为每个模型创建 Model 对象
+		for model_id in model_ids {
+			let model_name: crate::ModelName = model_id.clone().into();
+			let mut model = Model::new(model_name, model_id.clone());
 			
 			// 设置 Cohere 模型的通用特性
-			let (max_input_tokens, max_output_tokens) = ModelCapabilities::infer_token_limits(AdapterKind::Cohere, model_id);
+			let (max_input_tokens, max_output_tokens) = ModelCapabilities::infer_token_limits(AdapterKind::Cohere, &model_id);
 			model = model
 				.with_max_input_tokens(max_input_tokens)
 				.with_max_output_tokens(max_output_tokens)
-				.with_streaming(ModelCapabilities::supports_streaming(AdapterKind::Cohere, model_id))
-				.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Cohere, model_id))
-				.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Cohere, model_id));
+				.with_streaming(ModelCapabilities::supports_streaming(AdapterKind::Cohere, &model_id))
+				.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Cohere, &model_id))
+				.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Cohere, &model_id));
 			
-			// 设置输入输出模态 (Cohere 主要是文本模型)
-			let input_modalities = ModelCapabilities::infer_input_modalities(AdapterKind::Cohere, model_id);
-			let output_modalities = ModelCapabilities::infer_output_modalities(AdapterKind::Cohere, model_id);
+			// 设置输入输出模态
+			let input_modalities = ModelCapabilities::infer_input_modalities(AdapterKind::Cohere, &model_id);
+			let output_modalities = ModelCapabilities::infer_output_modalities(AdapterKind::Cohere, &model_id);
 			
 			model = model
 				.with_input_modalities(input_modalities)
@@ -221,6 +272,33 @@ impl Adapter for CohereAdapter {
 
 /// Support function
 impl CohereAdapter {
+	/// Parse Cohere models API response to extract model IDs
+	fn parse_models_response(mut web_response: crate::webc::WebResponse) -> Result<Vec<String>> {
+		// Cohere models API returns: {"models": [{"name": "command-r-plus", ...}, ...]}
+		let models_array: Vec<Value> = web_response.body.x_take("models")?;
+		
+		let mut model_ids = Vec::new();
+		for mut model_data in models_array {
+			if let Ok(model_name) = model_data.x_take::<String>("name") {
+				// Filter out models that are not chat models
+				// Cohere API might return embedding models or other types
+				if model_name.starts_with("command") 
+					|| model_name.starts_with("c4ai")
+					|| model_name.starts_with("aya-") {
+					model_ids.push(model_name);
+				}
+			}
+		}
+		
+		// If no models found in API response, return error to trigger fallback
+		if model_ids.is_empty() {
+			return Err(Error::InvalidJsonResponseElement {
+				info: "No valid chat models found in Cohere API response",
+			});
+		}
+		
+		Ok(model_ids)
+	}
 	/// Convert usage from '/meta/tokens'
 	/// ```json
 	///  "tokens": {
