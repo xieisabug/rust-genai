@@ -29,6 +29,11 @@ async fn test_chat_multi_system_ok() -> Result<()> {
 }
 
 #[tokio::test]
+async fn test_chat_json_mode_ok() -> Result<()> {
+	common_tests::common_test_chat_json_mode_ok(MODEL, Some(Check::USAGE)).await
+}
+
+#[tokio::test]
 async fn test_chat_json_structured_ok() -> Result<()> {
 	common_tests::common_test_chat_json_structured_ok(MODEL, Some(Check::USAGE)).await
 }
@@ -77,16 +82,32 @@ async fn test_chat_stream_capture_all_ok() -> Result<()> {
 
 // region:    --- Image Tests
 
-// NOTE: Gemini does not seem to support URL
+const VISION_MODEL: &str = "gemini-2.5-flash"; // Gemini 2.5 models have enhanced vision capabilities
+const VISION_PRO_MODEL: &str = "gemini-2.5-pro"; // Most advanced vision model
+
+// NOTE: Gemini does not seem to support URL-based images in the same way as other providers
 // #[tokio::test]
 // async fn test_chat_image_url_ok() -> Result<()> {
-// 	common_tests::common_test_chat_image_url_ok(MODEL).await
+// 	common_tests::common_test_chat_image_url_ok(VISION_MODEL).await
 // }
 
 #[tokio::test]
 async fn test_chat_image_b64_ok() -> Result<()> {
-	common_tests::common_test_chat_image_b64_ok(MODEL).await
+	common_tests::common_test_chat_image_b64_ok(VISION_MODEL).await
 }
+
+#[tokio::test]
+async fn test_chat_image_b64_pro_ok() -> Result<()> {
+	// Test with the most advanced vision model
+	common_tests::common_test_chat_image_b64_ok(VISION_PRO_MODEL).await
+}
+
+#[tokio::test]
+async fn test_chat_vision_gemini_2_0_ok() -> Result<()> {
+	// Test with Gemini 2.0 Flash which has native tool use capabilities
+	common_tests::common_test_chat_image_b64_ok("gemini-2.0-flash").await
+}
+
 // endregion: --- Image Test
 
 // region:    --- Tool Tests

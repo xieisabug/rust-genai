@@ -162,7 +162,7 @@ impl ModelCapabilities {
 				model_id.contains("claude-4") || model_id.contains("claude-opus-4") || model_id.contains("claude-sonnet-4")
 			),
 			AdapterKind::DeepSeek => Some(model_id.contains("reasoner")),
-			AdapterKind::Gemini => Some(model_id.contains("thinking")),
+			AdapterKind::Gemini => Some(model_id.contains("thinking") || model_id.contains("2.5")),
 			_ => None,
 		}
 	}
@@ -189,8 +189,13 @@ impl ModelCapabilities {
 			}
 			AdapterKind::Gemini => {
 				let mut set = HashSet::from([Modality::Text]);
-				if !model_id.contains("text") {
+				// Most Gemini models support vision except embedding models
+				if !model_id.contains("embedding") && !model_id.contains("text-embedding") {
 					set.insert(Modality::Image);
+				}
+				// Gemini 2.0 Flash Live supports audio input
+				if model_id.contains("2.0-flash-live") {
+					set.insert(Modality::Audio);
 				}
 				Some(set)
 			}
@@ -338,11 +343,29 @@ impl ModelCapabilities {
 
 	fn gemini_token_limits(model_id: &str) -> Option<(Option<u32>, Option<u32>)> {
 		let res = match model_id {
-			id if id.contains("gemini-2.0") => (Some(1_000_000), Some(32_768)),
-			id if id.contains("gemini-1.5-pro") => (Some(2_000_000), Some(8_192)),
-			id if id.contains("gemini-1.5-flash") => (Some(1_000_000), Some(8_192)),
-			id if id.contains("gemini-1.0-pro") => (Some(30_720), Some(2_048)),
-			id if id.contains("gemini-exp") => (Some(2_000_000), Some(8_192)),
+			// Gemini 2.5 series - Most advanced with thinking capabilities
+			id if id.contains("gemini-2.5-pro") => (Some(2_000_000), Some(32_768)), // 2M context (soon), 32K output
+			id if id.contains("gemini-2.5-flash") => (Some(1_000_000), Some(16_384)), // 1M context, 16K output
+			id if id.contains("gemini-2.5-flash-lite") => (Some(1_000_000), Some(8_192)), // 1M context, 8K output
+			
+			// Gemini 2.0 series - Next generation with native tool use
+			id if id.contains("gemini-2.0-flash") => (Some(1_000_000), Some(32_768)), // 1M context, 32K output
+			id if id.contains("gemini-2.0-flash-lite") => (Some(1_000_000), Some(16_384)), // 1M context, 16K output  
+			id if id.contains("gemini-2.0-flash-live") => (Some(1_000_000), Some(8_192)), // 1M context, 8K output (live)
+			
+			// Legacy Gemini 1.5 series
+			id if id.contains("gemini-1.5-pro") => (Some(2_000_000), Some(8_192)), // 2M context, 8K output
+			id if id.contains("gemini-1.5-flash") => (Some(1_000_000), Some(8_192)), // 1M context, 8K output
+			
+			// Gemini 1.0 series
+			id if id.contains("gemini-1.0-pro") => (Some(30_720), Some(2_048)), // 30K context, 2K output
+			
+			// Experimental models
+			id if id.contains("gemini-exp") => (Some(2_000_000), Some(8_192)), // Experimental high context
+			
+			// Embedding models
+			id if id.contains("embedding") => (Some(2_048), Some(768)), // Embedding input/output dimensions
+			
 			_ => return None,
 		};
 		Some(res)
