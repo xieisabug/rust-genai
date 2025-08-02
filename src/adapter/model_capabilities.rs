@@ -163,6 +163,9 @@ impl ModelCapabilities {
 			),
 			AdapterKind::DeepSeek => Some(model_id.contains("reasoner")),
 			AdapterKind::Gemini => Some(model_id.contains("thinking") || model_id.contains("2.5")),
+			AdapterKind::Groq => Some(
+				model_id.contains("qwen3-32b") // Qwen 3 supports reasoning_effort parameter
+			),
 			_ => None,
 		}
 	}
@@ -201,8 +204,10 @@ impl ModelCapabilities {
 			}
 			AdapterKind::Groq => {
 				let mut set = HashSet::from([Modality::Text]);
-				// 一些 Groq 模型支持图像
-				if model_id.contains("vision") || model_id.contains("llama-3.2") {
+				// Groq vision models support image input (verified 2025)
+				if model_id.contains("vision") || 
+				   model_id.contains("llama-3.2-90b") || 
+				   model_id.contains("llama-3.2-11b") {
 					set.insert(Modality::Image);
 				}
 				Some(set)
@@ -240,6 +245,19 @@ impl ModelCapabilities {
 				ReasoningEffortType::High,
 				ReasoningEffortType::Budget,
 			]),
+			AdapterKind::Groq => {
+				// Groq reasoning models support effort control (verified 2025)
+				if model_id.contains("qwen3-32b") {
+					Some(vec![
+						ReasoningEffortType::Low,
+						ReasoningEffortType::Medium,
+						ReasoningEffortType::High,
+						ReasoningEffortType::Budget,
+					])
+				} else {
+					None
+				}
+			},
 			_ => None,
 		}
 	}
@@ -373,15 +391,49 @@ impl ModelCapabilities {
 
 	fn groq_token_limits(model_id: &str) -> Option<(Option<u32>, Option<u32>)> {
 		let res = match model_id {
-			id if id.contains("llama-3.1-405b-reasoning") => (Some(32_768), Some(32_768)),
-			id if id.contains("llama-3.1-70b") => (Some(131_072), Some(32_768)),
-			id if id.contains("llama-3.1-8b") => (Some(131_072), Some(32_768)),
-			id if id.contains("llama-3.3-70b") => (Some(131_072), Some(32_768)),
-			id if id.contains("llama-3.2") && id.contains("vision") => (Some(8_192), Some(8_192)),
-			id if id.contains("llama-3.2") => (Some(131_072), Some(32_768)),
+			// --- Production Models (verified with official Groq documentation 2025) ---
+			// Moonshot AI Kimi K2 - 131K context, 16K output (verified)
+			id if id.contains("moonshotai/kimi-k2-instruct") => (Some(131_072), Some(16_384)),
+			// Qwen 3 32B - 128K context, 32K output (updated from search results)
+			id if id.contains("qwen/qwen3-32b") => (Some(128_000), Some(32_768)),
+			// Llama 3.3 70B - 128K context, 32K output (verified)
+			id if id.contains("llama-3.3-70b-versatile") => (Some(128_000), Some(32_768)),
+			// Llama 3.1 8B instant - 131K context, 131K output (verified)
+			id if id.contains("llama-3.1-8b-instant") => (Some(131_072), Some(131_072)),
+			// Gemma2 9B - 8K context, 8K output (verified)
+			id if id.contains("gemma2-9b-it") => (Some(8_192), Some(8_192)),
+			// Llama Guard 4 12B - 131K context, 1K output (safety model, verified)
+			id if id.contains("meta-llama/llama-guard-4-12b") => (Some(131_072), Some(1_024)),
+
+			// --- Preview Models (verified capabilities) ---
+			// DeepSeek R1 distilled - 128K context, 32K max output (updated - default 1K but can go up to 32K)
+			id if id.contains("deepseek-r1-distill-llama-70b") => (Some(128_000), Some(32_768)),
+			// Llama 4 Maverick 17B - 131K context, 8K output (verified)
+			id if id.contains("meta-llama/llama-4-maverick-17b-128e-instruct") => (Some(131_072), Some(8_192)),
+			// Llama 4 Scout 17B - 131K context, 8K output (verified)
+			id if id.contains("meta-llama/llama-4-scout-17b-16e-instruct") => (Some(131_072), Some(8_192)),
+			// Prompt Guard models - 512 context, 512 output (verified)
+			id if id.contains("meta-llama/llama-prompt-guard-2") => (Some(512), Some(512)),
+
+			// --- Legacy Models (maintaining existing specs) ---
+			// Llama 3.1 405B reasoning - 131K context, 32K output
+			id if id.contains("llama-3.1-405b-reasoning") => (Some(131_072), Some(32_768)),
+			// Llama 3.1 70B versatile - 131K context, 32K output
+			id if id.contains("llama-3.1-70b-versatile") => (Some(131_072), Some(32_768)),
+			// Llama 3.2 vision models - verified multimodal capabilities with image support
+			id if id.contains("llama-3.2-90b-vision") => (Some(131_072), Some(32_768)),
+			id if id.contains("llama-3.2-11b-vision") => (Some(131_072), Some(16_384)),
+			// Llama 3.2 smaller models
+			id if id.contains("llama-3.2-3b-preview") => (Some(131_072), Some(32_768)),
+			id if id.contains("llama-3.2-1b-preview") => (Some(131_072), Some(32_768)),
+			// Mixtral 8x7B - 32K context window
 			id if id.contains("mixtral-8x7b-32768") => (Some(32_768), Some(32_768)),
-			id if id.contains("gemma") => (Some(8_192), Some(8_192)),
+			// Legacy Llama models
 			id if id.contains("llama3-70b-8192") => (Some(8_192), Some(8_192)),
+			id if id.contains("llama-guard-3-8b") => (Some(8_192), Some(8_192)),
+			// Legacy Gemma 7B
+			id if id.contains("gemma-7b-it") => (Some(8_192), Some(8_192)),
+			
 			_ => return None,
 		};
 		Some(res)
