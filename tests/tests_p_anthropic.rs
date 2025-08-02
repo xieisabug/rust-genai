@@ -145,7 +145,7 @@ async fn test_list_models() -> Result<()> {
 
 #[tokio::test]
 async fn test_all_models() -> Result<()> {
-	common_tests::common_test_all_models(AdapterKind::Anthropic, "claude-3-haiku-20240307").await
+	common_tests::common_test_all_models(AdapterKind::Anthropic, "claude-4-sonnet").await
 }
 
 // endregion: --- List

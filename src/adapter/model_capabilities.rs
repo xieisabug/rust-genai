@@ -155,6 +155,9 @@ impl ModelCapabilities {
 	fn provider_supports_reasoning(kind: AdapterKind, model_id: &str) -> Option<bool> {
 		match kind {
 			AdapterKind::OpenAI => Some(Self::openai_supports_reasoning(model_id)),
+			AdapterKind::Anthropic => Some(
+				model_id.contains("claude-4") || model_id.contains("claude-opus-4") || model_id.contains("claude-sonnet-4")
+			),
 			AdapterKind::DeepSeek => Some(model_id.contains("reasoner")),
 			AdapterKind::Gemini => Some(model_id.contains("thinking")),
 			_ => None,
@@ -165,8 +168,10 @@ impl ModelCapabilities {
 		match kind {
 			AdapterKind::Anthropic => {
 				let mut set = HashSet::from([Modality::Text]);
-				// Claude 3+ 支持图像输入
-				if model_id.contains("claude-3") || model_id.contains("claude-2.1") {
+				// Claude 3+、Claude 4+ 支持图像输入
+				if model_id.contains("claude-3") || model_id.contains("claude-4") 
+					|| model_id.contains("claude-opus-4") || model_id.contains("claude-sonnet-4")
+					|| model_id.contains("claude-2.1") {
 					set.insert(Modality::Image);
 				}
 				Some(set)
@@ -201,6 +206,18 @@ impl ModelCapabilities {
 	fn provider_reasoning_efforts(kind: AdapterKind, model_id: &str) -> Option<Vec<ReasoningEffortType>> {
 		match kind {
 			AdapterKind::OpenAI => Some(Self::openai_infer_reasoning_efforts(model_id)),
+			AdapterKind::Anthropic => {
+				if model_id.contains("claude-4") || model_id.contains("claude-opus-4") || model_id.contains("claude-sonnet-4") {
+					Some(vec![
+						ReasoningEffortType::Low,
+						ReasoningEffortType::Medium,
+						ReasoningEffortType::High,
+						ReasoningEffortType::Budget,
+					])
+				} else {
+					None
+				}
+			},
 			AdapterKind::Gemini | AdapterKind::DeepSeek => Some(vec![
 				ReasoningEffortType::Low,
 				ReasoningEffortType::Medium,
@@ -250,11 +267,19 @@ impl ModelCapabilities {
 
 	fn anthropic_token_limits(model_id: &str) -> Option<(Option<u32>, Option<u32>)> {
 		let res = match model_id {
+			// Claude 4 系列 - 2025年5月发布
+			id if id.contains("claude-opus-4") => (Some(200_000), Some(32_000)),
+			id if id.contains("claude-sonnet-4") => (Some(200_000), Some(64_000)),
+			// Claude 3.7 系列
+			id if id.contains("claude-3-7-sonnet") => (Some(200_000), Some(8_192)),
+			// Claude 3.5 系列
 			id if id.contains("claude-3-5-sonnet") => (Some(200_000), Some(8_192)),
 			id if id.contains("claude-3-5-haiku") => (Some(200_000), Some(8_192)),
+			// Claude 3 系列
 			id if id.contains("claude-3-opus") => (Some(200_000), Some(4_096)),
 			id if id.contains("claude-3-sonnet") => (Some(200_000), Some(4_096)),
 			id if id.contains("claude-3-haiku") => (Some(200_000), Some(4_096)),
+			// Claude 2 系列
 			id if id.contains("claude-2.1") => (Some(200_000), Some(4_096)),
 			id if id.contains("claude-2.0") => (Some(100_000), Some(4_096)),
 			id if id.contains("claude-instant") => (Some(100_000), Some(4_096)),

@@ -7,7 +7,7 @@ use crate::chat::{
 };
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
-use crate::{Headers, ModelIden};
+use crate::{Headers, ModelIden, Error};
 use crate::{Result, ServiceTarget};
 use reqwest::RequestBuilder;
 use reqwest_eventsource::EventSource;
@@ -22,10 +22,13 @@ pub struct AnthropicAdapter;
 // NOTE: For Anthropic, the max_tokens must be specified.
 //       To avoid surprises, the default value for genai is the maximum for a given model.
 // Current logic:
-// - if model contains `3-opus` or `3-haiku` 4x max token limit,
-// - otherwise assume 8k model
+// - Claude 4 系列: claude-sonnet-4 (64K), claude-opus-4 (32K)
+// - Claude 3.7 系列: claude-3-7-sonnet (64K)
+// - Claude 3.5 系列: claude-3-5-sonnet, claude-3-5-haiku (8K)
+// - Claude 3 原版: claude-3-opus, claude-3-haiku (4K)
+// - 默认回退: 64K
 //
-// NOTE: Will need to add the thinking option: https://docs.anthropic.com/en/docs/build-with-claude/extended-thinking
+// NOTE: Claude 4 系列支持混合推理模式
 // For max model tokens see: https://docs.anthropic.com/en/docs/about-claude/models/overview
 //
 // fall back
@@ -47,12 +50,20 @@ const MODELS: &[&str] = &[
 
 impl AnthropicAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "ANTHROPIC_API_KEY";
+	pub const BASE_URL_DEFAULT_ENV_NAME: &str = "ANTHROPIC_BASE_URL";
 }
 
 impl Adapter for AnthropicAdapter {
 	fn default_endpoint() -> Endpoint {
 		const BASE_URL: &str = "https://api.anthropic.com/v1/";
-		Endpoint::from_static(BASE_URL)
+		let mut base_url = std::env::var(Self::BASE_URL_DEFAULT_ENV_NAME).unwrap_or_else(|_| BASE_URL.to_string());
+
+		// 确保 base_url 以 / 结尾
+		if !base_url.ends_with('/') {
+			base_url.push('/');
+		}
+
+		Endpoint::from_owned(base_url)
 	}
 
 	fn default_auth() -> AuthData {
@@ -64,32 +75,79 @@ impl Adapter for AnthropicAdapter {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 
-	async fn all_models(_kind: AdapterKind, _target: ServiceTarget) -> Result<Vec<Model>> {
-		// 为 Anthropic 模型创建基本的模型信息
-		let mut models = Vec::new();
-		
-		for &model_id in MODELS {
-			let model_name: crate::ModelName = model_id.into();
-			let mut model = Model::new(model_name, model_id);
-			
-			// 设置 Claude 模型的通用特性
-			let (max_input_tokens, max_output_tokens) = ModelCapabilities::infer_token_limits(AdapterKind::Anthropic, model_id);
-			model = model
-				.with_max_input_tokens(max_input_tokens)
-				.with_max_output_tokens(max_output_tokens)
-				.with_streaming(ModelCapabilities::supports_streaming(AdapterKind::Anthropic, model_id))
-				.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Anthropic, model_id))
-				.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Anthropic, model_id));
-			
-			// 设置输入输出模态
-			let input_modalities = ModelCapabilities::infer_input_modalities(AdapterKind::Anthropic, model_id);
-			let output_modalities = ModelCapabilities::infer_output_modalities(AdapterKind::Anthropic, model_id);
-			
-			model = model
-				.with_input_modalities(input_modalities)
-				.with_output_modalities(output_modalities);
-			
-			models.push(model);
+	async fn all_models(kind: AdapterKind, target: ServiceTarget) -> Result<Vec<Model>> {
+		// 使用传入的认证和端点配置
+		let auth = target.auth;
+		let endpoint = target.endpoint;
+
+		// 构建一个临时的 ModelIden 用于获取服务 URL
+		let model_iden = ModelIden::new(kind, "temp");
+
+		// 获取 models API 的 URL
+		let url = Self::get_service_url(&model_iden, ServiceType::Models, endpoint);
+
+		// 获取 API key
+		let api_key = get_api_key(auth, &model_iden)?;
+
+		// 构建请求头 - Anthropic 使用不同的认证头格式
+		let headers = vec![
+			("x-api-key".to_string(), api_key),
+			("anthropic-version".to_string(), ANTHROPIC_VERSION.to_string()),
+		];
+
+		// 创建 WebClient 并发送请求
+		let web_client = crate::webc::WebClient::default();
+		let web_response = web_client
+			.do_get(&url, &headers)
+			.await
+			.map_err(|webc_error| Error::WebAdapterCall {
+				adapter_kind: kind,
+				webc_error,
+			});
+
+		// 解析响应
+		let mut models: Vec<Model> = Vec::new();
+
+		match web_response {
+			Ok(mut response) => {
+				// Anthropic API 返回的结构是 { "data": [...] }
+				if let Ok(Value::Array(models_data)) = response.body.x_take("data") {
+					for mut model_data in models_data {
+						if let Ok(model_id) = model_data.x_take::<String>("id") {
+							// 解析模型的基本信息
+							let model = Self::parse_anthropic_model_to_model(model_id, model_data)?;
+							models.push(model);
+						}
+					}
+				}
+			}
+			Err(e) => {
+				// API 调用失败时记录警告并回退到硬编码模型
+				warn!("Anthropic models API call failed: {}, falling back to hardcoded models", e);
+			}
+		}
+
+		// 如果 API 调用失败或返回空列表，回退到硬编码的模型列表
+		if models.is_empty() {
+			for &model_id in MODELS {
+				let model_name: crate::ModelName = model_id.into();
+				let mut model = Model::new(model_name, model_id);
+				
+				// 设置 Claude 模型的通用特性
+				let (max_input_tokens, max_output_tokens) = ModelCapabilities::infer_token_limits(AdapterKind::Anthropic, model_id);
+				model = model
+					.with_max_input_tokens(max_input_tokens)
+					.with_max_output_tokens(max_output_tokens)
+					.with_streaming(ModelCapabilities::supports_streaming(AdapterKind::Anthropic, model_id))
+					.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Anthropic, model_id))
+					.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Anthropic, model_id))
+					.with_reasoning(ModelCapabilities::supports_reasoning(AdapterKind::Anthropic, model_id))
+					.with_reasoning_efforts(ModelCapabilities::infer_reasoning_efforts(AdapterKind::Anthropic, model_id))
+					.with_input_modalities(ModelCapabilities::infer_input_modalities(AdapterKind::Anthropic, model_id))
+					.with_output_modalities(ModelCapabilities::infer_output_modalities(AdapterKind::Anthropic, model_id));
+
+				models.push(model);
+			}
 		}
 		
 		Ok(models)
@@ -293,6 +351,45 @@ impl Adapter for AnthropicAdapter {
 // region:    --- Support
 
 impl AnthropicAdapter {
+	/// 将 Anthropic models API 返回的模型数据解析为 genai Model 对象
+	pub(super) fn parse_anthropic_model_to_model(model_id: String, mut model_data: Value) -> Result<Model> {
+		let model_name: crate::ModelName = model_id.as_str().into();
+		let mut model = Model::new(model_name, &model_id);
+
+		// 从 API 响应中提取可用信息
+		// Anthropic API 返回的字段：created_at, display_name, id, type
+		if let Ok(display_name) = model_data.x_take::<String>("display_name") {
+			model = model.with_additional_properties(serde_json::json!({
+				"display_name": display_name
+			}));
+		}
+
+		// 使用 ModelCapabilities 系统推断模型能力
+		let (max_input_tokens, max_output_tokens) = ModelCapabilities::infer_token_limits(AdapterKind::Anthropic, &model_id);
+		model = model
+			.with_max_input_tokens(max_input_tokens)
+			.with_max_output_tokens(max_output_tokens)
+			.with_streaming(ModelCapabilities::supports_streaming(AdapterKind::Anthropic, &model_id))
+			.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Anthropic, &model_id))
+			.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Anthropic, &model_id));
+
+		// 设置推理能力
+		if ModelCapabilities::supports_reasoning(AdapterKind::Anthropic, &model_id) {
+			let reasoning_efforts = ModelCapabilities::infer_reasoning_efforts(AdapterKind::Anthropic, &model_id);
+			model = model.with_reasoning_efforts(reasoning_efforts);
+		}
+
+		// 设置输入输出模态
+		let input_modalities = ModelCapabilities::infer_input_modalities(AdapterKind::Anthropic, &model_id);
+		let output_modalities = ModelCapabilities::infer_output_modalities(AdapterKind::Anthropic, &model_id);
+		
+		model = model
+			.with_input_modalities(input_modalities)
+			.with_output_modalities(output_modalities);
+
+		Ok(model)
+	}
+
 	pub(super) fn into_usage(mut usage_value: Value) -> Usage {
 		// IMPORTANT: For Anthropic, the `input_tokens` does not include `cache_creation_input_tokens` or `cache_read_input_tokens`.
 		// Therefore, it must be normalized in the OpenAI style, where it includes both cached and written tokens (for symmetry).

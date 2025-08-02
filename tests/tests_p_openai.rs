@@ -119,6 +119,11 @@ async fn test_list_models() -> Result<()> {
 	common_tests::common_test_list_models(AdapterKind::OpenAI, "gpt-4o").await
 }
 
+// when run this test, you need to set the OPENAI_API_KEY environment variables
+// if you want to change the base url, you need to set the OPENAI_BASE_URL environment variables
+// example:
+// linux: export OPENAI_BASE_URL="https://xxxx/v1/" && export OPENAI_API_KEY="sk-proj-1234567890" && cargo test --test tests_p_openai::test_all_models
+// windows: $env:OPENAI_BASE_URL="https://xxxx/v1/"; $env:OPENAI_API_KEY="sk-proj-1234567890"; cargo test --test tests_p_openai -- test_all_models
 #[tokio::test]
 async fn test_all_models() -> Result<()> {
 	common_tests::common_test_all_models(AdapterKind::OpenAI, "gpt-4o-mini").await

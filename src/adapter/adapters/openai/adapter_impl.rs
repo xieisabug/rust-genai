@@ -35,6 +35,7 @@ const MODELS: &[&str] = &[
 
 impl OpenAIAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "OPENAI_API_KEY";
+	pub const BASE_URL_DEFAULT_ENV_NAME: &str = "OPENAI_BASE_URL";
 
 	/// 将 OpenAI API 返回的模型数据转换为统一的 Model 结构
 	fn parse_openai_model_to_model(model_id: String, mut model_data: Value) -> Result<Model> {
@@ -130,7 +131,14 @@ impl Adapter for OpenAIAdapter {
 
 	fn default_endpoint() -> Endpoint {
 		const BASE_URL: &str = "https://api.openai.com/v1/";
-		Endpoint::from_static(BASE_URL)
+		let mut base_url = std::env::var(Self::BASE_URL_DEFAULT_ENV_NAME).unwrap_or_else(|_| BASE_URL.to_string());
+
+		// 确保 base_url 以 / 结尾
+		if !base_url.ends_with('/') {
+			base_url.push('/');
+		}
+
+		Endpoint::from_owned(base_url)
 	}
 
 	/// Note: Currently returns the common models (see above)
