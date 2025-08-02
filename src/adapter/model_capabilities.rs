@@ -69,6 +69,7 @@ impl ModelCapabilities {
 		match kind {
 			AdapterKind::OpenAI => Self::openai_supports_tool_calls(model_id),
 			AdapterKind::Cohere => Self::cohere_supports_tool_calls(model_id),
+			AdapterKind::DeepSeek => Self::deepseek_supports_tool_calls(model_id),
 			_ => true,
 		}
 	}
@@ -144,9 +145,9 @@ impl ModelCapabilities {
 		match kind {
 			AdapterKind::OpenAI => Some(Self::openai_supports_json_mode(model_id)),
 			AdapterKind::Cohere => Some(Self::cohere_supports_json_mode(model_id)),
+			AdapterKind::DeepSeek => Some(Self::deepseek_supports_json_mode(model_id)),
 			AdapterKind::Anthropic | AdapterKind::Gemini => Some(false),
-			AdapterKind::DeepSeek
-			| AdapterKind::Groq
+			AdapterKind::Groq
 			| AdapterKind::Xai
 			| AdapterKind::Nebius
 			| AdapterKind::Ollama
@@ -326,8 +327,10 @@ impl ModelCapabilities {
 
 	fn deepseek_token_limits(model_id: &str) -> Option<(Option<u32>, Option<u32>)> {
 		let res = match model_id {
+			// DeepSeek-R1-0528 (reasoning model) - 64K input, 8K output (reasoning tokens not counted)
 			"deepseek-reasoner" => (Some(64_000), Some(8_192)),
-			"deepseek-chat" => (Some(32_000), Some(4_096)),
+			// DeepSeek-V3-0324 (general chat) - 64K input, 8K output  
+			"deepseek-chat" => (Some(64_000), Some(8_192)),
 			_ => return None,
 		};
 		Some(res)
@@ -509,5 +512,19 @@ impl ModelCapabilities {
 		} else {
 			!model_id.contains("command-light")
 		}
+	}
+
+	// ---------- DEEPSEEK SPECIFIC HELPERS ----------
+
+	/// DeepSeek models that support tool calls
+	fn deepseek_supports_tool_calls(model_id: &str) -> bool {
+		// Both DeepSeek models support function calling (up to 128 functions)
+		model_id == "deepseek-chat" || model_id == "deepseek-reasoner"
+	}
+
+	/// DeepSeek models that support JSON mode
+	fn deepseek_supports_json_mode(model_id: &str) -> bool {
+		// Both DeepSeek models support structured JSON output
+		model_id == "deepseek-chat" || model_id == "deepseek-reasoner"
 	}
 }

@@ -32,6 +32,11 @@ async fn test_chat_json_mode_ok() -> Result<()> {
 }
 
 #[tokio::test]
+async fn test_chat_json_structured_ok() -> Result<()> {
+	common_tests::common_test_chat_json_structured_ok(MODEL, Some(Check::USAGE)).await
+}
+
+#[tokio::test]
 async fn test_chat_temperature_ok() -> Result<()> {
 	common_tests::common_test_chat_temperature_ok(MODEL).await
 }
@@ -42,6 +47,20 @@ async fn test_chat_stop_sequences_ok() -> Result<()> {
 }
 
 // endregion: --- Chat
+
+// region:    --- Tool Tests
+
+#[tokio::test]
+async fn test_tool_simple_ok() -> Result<()> {
+	common_tests::common_test_tool_simple_ok(MODEL, true).await
+}
+
+#[tokio::test]
+async fn test_tool_full_flow_ok() -> Result<()> {
+	common_tests::common_test_tool_full_flow_ok(MODEL, true).await
+}
+
+// endregion: --- Tool Tests
 
 // region:    --- Chat Stream Tests
 
@@ -76,6 +95,15 @@ async fn test_resolver_auth_ok() -> Result<()> {
 #[tokio::test]
 async fn test_list_models() -> Result<()> {
 	common_tests::common_test_list_models(AdapterKind::DeepSeek, "deepseek-chat").await
+}
+
+// when run this test, you need to set the DEEPSEEK_API_KEY environment variables
+// example:
+// linux: export DEEPSEEK_API_KEY="your-api-key" && cargo test --test tests_p_deepseek::test_all_models
+// windows: $env:DEEPSEEK_API_KEY="your-api-key"; cargo test --test tests_p_deepseek -- test_all_models
+#[tokio::test]
+async fn test_all_models() -> Result<()> {
+	common_tests::common_test_all_models(AdapterKind::DeepSeek, "deepseek-chat").await
 }
 
 // endregion: --- List
