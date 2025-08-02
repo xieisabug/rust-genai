@@ -109,7 +109,8 @@ impl ModelCapabilities {
             | AdapterKind::Groq
             | AdapterKind::Xai
             | AdapterKind::Nebius
-            | AdapterKind::Ollama => Some(true),
+            | AdapterKind::Ollama
+            | AdapterKind::Zhipu => Some(true),
         }
     }
 
@@ -117,7 +118,7 @@ impl ModelCapabilities {
         match kind {
             AdapterKind::OpenAI => Some(Self::openai_supports_json_mode(model_id)),
             AdapterKind::Anthropic | AdapterKind::Cohere | AdapterKind::Gemini => Some(false),
-            AdapterKind::DeepSeek | AdapterKind::Groq | AdapterKind::Xai | AdapterKind::Nebius | AdapterKind::Ollama => Some(true),
+            AdapterKind::DeepSeek | AdapterKind::Groq | AdapterKind::Xai | AdapterKind::Nebius | AdapterKind::Ollama | AdapterKind::Zhipu => Some(true),
         }
     }
 
@@ -196,6 +197,7 @@ impl ModelCapabilities {
             AdapterKind::Xai => Self::xai_token_limits(model_id),
             AdapterKind::Nebius => Self::nebius_token_limits(model_id),
             AdapterKind::Ollama => Self::ollama_token_limits(model_id),
+            AdapterKind::Zhipu => Self::zhipu_token_limits(model_id),
         }
     }
 
@@ -300,6 +302,11 @@ impl ModelCapabilities {
     fn ollama_token_limits(_model_id: &str) -> Option<(Option<u32>, Option<u32>)> {
         // Local Ollama models – very rough defaults.
         Some((Some(32_768), Some(8_192)))
+    }
+
+    fn zhipu_token_limits(_model_id: &str) -> Option<(Option<u32>, Option<u32>)> {
+        // Zhipu does not expose specific per-model limits publicly; use broad defaults.
+        Some((Some(128_000), Some(8_192)))
     }
 
     // ---------- ORIGINAL OPENAI HELPERS (kept public for fallback) ----------
