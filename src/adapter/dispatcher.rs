@@ -1,4 +1,3 @@
-use crate::{Model, ModelIden};
 use crate::adapter::anthropic::AnthropicAdapter;
 use crate::adapter::cohere::CohereAdapter;
 use crate::adapter::gemini::GeminiAdapter;
@@ -8,6 +7,7 @@ use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse};
 use crate::embed::{EmbedOptionsSet, EmbedRequest, EmbedResponse};
 use crate::webc::WebResponse;
+use crate::{Model, ModelIden};
 use crate::{Result, ServiceTarget};
 use reqwest::RequestBuilder;
 
@@ -82,6 +82,7 @@ impl AdapterDispatcher {
 			AdapterKind::Nebius => NebiusAdapter::all_models(kind, target).await,
 			AdapterKind::Xai => XaiAdapter::all_models(kind, target).await,
 			AdapterKind::DeepSeek => DeepSeekAdapter::all_models(kind, target).await,
+			AdapterKind::Zhipu => ZhipuAdapter::all_models(kind, target).await,
 		}
 	}
 

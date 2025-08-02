@@ -82,4 +82,10 @@ async fn test_list_models() -> Result<()> {
 	common_tests::common_test_list_models(AdapterKind::Ollama, "gemma3:4b").await
 }
 
+/// NOTE this test assume the "gemma3:4b" is present.
+#[tokio::test]
+async fn test_all_models() -> Result<()> {
+	common_tests::common_test_all_models(AdapterKind::Ollama, "mistral-small3.2:latest").await
+}
+
 // endregion: --- List
