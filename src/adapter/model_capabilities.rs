@@ -166,6 +166,12 @@ impl ModelCapabilities {
 			AdapterKind::Groq => Some(
 				model_id.contains("qwen3-32b") // Qwen 3 supports reasoning_effort parameter
 			),
+			AdapterKind::Xai => Some(
+				// Only these xAI models support "通用推理" (general reasoning) according to official docs
+				model_id == "grok-4-0709" || 
+				model_id == "grok-3-mini" || 
+				model_id == "grok-3-mini-fast"
+			),
 			_ => None,
 		}
 	}
@@ -212,6 +218,16 @@ impl ModelCapabilities {
 				}
 				Some(set)
 			}
+			AdapterKind::Xai => {
+				let mut set = HashSet::from([Modality::Text]);
+				// xAI models that support image input (verified from official docs 2025)
+				// Only grok-4-0709 and grok-2-vision-1212 support image input
+				if model_id == "grok-4-0709" || 
+				   model_id.contains("grok-2-vision-1212") {
+					set.insert(Modality::Image);
+				}
+				Some(set)
+			}
 			AdapterKind::OpenAI => Some(Self::openai_infer_input_modalities(model_id)),
 			_ => None,
 		}
@@ -248,6 +264,21 @@ impl ModelCapabilities {
 			AdapterKind::Groq => {
 				// Groq reasoning models support effort control (verified 2025)
 				if model_id.contains("qwen3-32b") {
+					Some(vec![
+						ReasoningEffortType::Low,
+						ReasoningEffortType::Medium,
+						ReasoningEffortType::High,
+						ReasoningEffortType::Budget,
+					])
+				} else {
+					None
+				}
+			},
+			AdapterKind::Xai => {
+				// xAI reasoning models support effort control (verified from official docs 2025)
+				if model_id == "grok-4-0709" || 
+				   model_id == "grok-3-mini" || 
+				   model_id == "grok-3-mini-fast" {
 					Some(vec![
 						ReasoningEffortType::Low,
 						ReasoningEffortType::Medium,
@@ -440,10 +471,25 @@ impl ModelCapabilities {
 	}
 
 	fn xai_token_limits(model_id: &str) -> Option<(Option<u32>, Option<u32>)> {
-		let res = if model_id.contains("grok-3") || model_id.contains("grok") {
-			(Some(131_072), Some(32_768))
-		} else {
-			return None;
+		let res = match model_id {
+			// --- Grok 4 Series (verified from official xAI docs) ---
+			"grok-4-0709" => (Some(256_000), Some(32_768)), // 256K context, estimate 32K output
+			
+			// --- Grok 3 Series (verified from official xAI docs) ---
+			"grok-3" => (Some(131_072), Some(32_768)),          // 131K context, estimate 32K output
+			"grok-3-mini" => (Some(131_072), Some(16_384)),     // 131K context, estimate 16K output
+			"grok-3-fast" => (Some(131_072), Some(32_768)),     // 131K context, estimate 32K output
+			"grok-3-mini-fast" => (Some(131_072), Some(8_192)), // 131K context, estimate 8K output
+			
+			// --- Grok 2 Vision Series (verified from official xAI docs) ---
+			"grok-2-vision-1212" => (Some(32_768), Some(8_192)), // 32K context, estimate 8K output
+			
+			// --- Legacy/Generic Grok models ---
+			id if id.contains("grok-4") => (Some(256_000), Some(32_768)), // Fallback for grok-4 variants
+			id if id.contains("grok-3") => (Some(131_072), Some(32_768)), // Fallback for grok-3 variants  
+			id if id.contains("grok") => (Some(131_072), Some(32_768)),   // Generic grok fallback
+			
+			_ => return None,
 		};
 		Some(res)
 	}
