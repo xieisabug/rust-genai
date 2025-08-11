@@ -1,83 +1,88 @@
 mod support;
 
 use crate::support::{Check, TestResult, common_tests};
-use genai::adapter::AdapterKind;
 use genai::resolver::AuthData;
+use serial_test::serial;
 
-const MODEL: &str = "deepseek-chat";
-const MODEL_NS: &str = "deepseek::deepseek-chat";
+// meta-llama/Llama-3-8b-chat-hf ($0.2) , Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 ($2)
+// meta-llama/Llama-3.3-70B-Instruct-Turbo ($0.88) , Qwen/Qwen3-235B-A22B-Instruct-2507-tput ($0.2/$0.6)
+const MODEL: &str = "together::Qwen/Qwen3-235B-A22B-Instruct-2507-tput";
+//const MODEL_FOR_IMAGE: &str = "together::Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8";
+const MODEL_NS: &str = "together::Qwen/Qwen3-235B-A22B-Instruct-2507-tput";
 
 // region:    --- Chat
 
 #[tokio::test]
+#[serial(together)]
 async fn test_chat_simple_ok() -> TestResult<()> {
 	common_tests::common_test_chat_simple_ok(MODEL, None).await
 }
 
 #[tokio::test]
+#[serial(together)]
 async fn test_chat_namespaced_ok() -> TestResult<()> {
 	common_tests::common_test_chat_simple_ok(MODEL_NS, None).await
 }
 
 #[tokio::test]
+#[serial(together)]
 async fn test_chat_multi_system_ok() -> TestResult<()> {
 	common_tests::common_test_chat_multi_system_ok(MODEL).await
 }
 
 #[tokio::test]
+#[serial(together)]
 async fn test_chat_json_mode_ok() -> TestResult<()> {
 	common_tests::common_test_chat_json_mode_ok(MODEL, Some(Check::USAGE)).await
 }
 
 #[tokio::test]
+#[serial(together)]
 async fn test_chat_json_structured_ok() -> TestResult<()> {
 	common_tests::common_test_chat_json_structured_ok(MODEL, Some(Check::USAGE)).await
 }
 
 #[tokio::test]
-async fn test_chat_json_structured_ok() -> TestResult<()> {
-	common_tests::common_test_chat_json_structured_ok(MODEL, Some(Check::USAGE)).await
-}
-
-#[tokio::test]
+#[serial(together)]
 async fn test_chat_temperature_ok() -> TestResult<()> {
 	common_tests::common_test_chat_temperature_ok(MODEL).await
 }
 
 #[tokio::test]
+#[serial(together)]
 async fn test_chat_stop_sequences_ok() -> TestResult<()> {
 	common_tests::common_test_chat_stop_sequences_ok(MODEL).await
 }
 
 // endregion: --- Chat
 
-// region:    --- Tool Tests
+// region:    --- Chat Implicit Cache
 
-#[tokio::test]
-async fn test_tool_simple_ok() -> Result<()> {
-	common_tests::common_test_tool_simple_ok(MODEL, true).await
-}
+/// Caching does not seem to be supported for together (at least not reported)
+// #[tokio::test]
+// #[serial(together)]
+// async fn test_chat_cache_implicit_simple_ok() -> TestResult<()> {
+// 	common_tests::common_test_chat_cache_implicit_simple_ok(MODEL).await
+// }
 
-#[tokio::test]
-async fn test_tool_full_flow_ok() -> Result<()> {
-	common_tests::common_test_tool_full_flow_ok(MODEL, true).await
-}
-
-// endregion: --- Tool Tests
+// endregion: --- Chat Implicit Cache
 
 // region:    --- Chat Stream Tests
 
 #[tokio::test]
+#[serial(together)]
 async fn test_chat_stream_simple_ok() -> TestResult<()> {
 	common_tests::common_test_chat_stream_simple_ok(MODEL, None).await
 }
 
 #[tokio::test]
+#[serial(together)]
 async fn test_chat_stream_capture_content_ok() -> TestResult<()> {
 	common_tests::common_test_chat_stream_capture_content_ok(MODEL).await
 }
 
 #[tokio::test]
+#[serial(together)]
 async fn test_chat_stream_capture_all_ok() -> TestResult<()> {
 	common_tests::common_test_chat_stream_capture_all_ok(MODEL, None).await
 }
@@ -86,53 +91,72 @@ async fn test_chat_stream_capture_all_ok() -> TestResult<()> {
 
 // region:    --- Binary Tests
 
-// Deepseek.com does not seems to support those
-
 // #[tokio::test]
+// #[serial(together)]
 // async fn test_chat_binary_image_url_ok() -> TestResult<()> {
 // 	common_tests::common_test_chat_image_url_ok(MODEL).await
 // }
 
+// NOTE: Only found that Qwen/Qwen3-Coder-480B-A35B-Instruct-FP8 was supporting image without returning
+//       invalid format, but the rendered image could not be viewed yet.
 // #[tokio::test]
+// #[serial(together)]
 // async fn test_chat_binary_image_b64_ok() -> TestResult<()> {
-// 	common_tests::common_test_chat_image_b64_ok(MODEL).await
+// 	common_tests::common_test_chat_image_b64_ok(MODEL_FOR_IMAGE).await
 // }
 
+// NOT SUPPORTED YET
+
 // #[tokio::test]
+// #[serial(together)]
+// #[ignore = "Binary PDF is currently not supported by TogetherAI."]
 // async fn test_chat_binary_pdf_b64_ok() -> TestResult<()> {
 // 	common_tests::common_test_chat_pdf_b64_ok(MODEL).await
 // }
 
 // #[tokio::test]
+// #[serial(together)]
+// #[ignore = "Multiple binary payloads are currently not supported by TogetherAI."]
 // async fn test_chat_binary_multi_b64_ok() -> TestResult<()> {
 // 	common_tests::common_test_chat_multi_binary_b64_ok(MODEL).await
 // }
 
 // endregion: --- Binary Tests
 
+// region:    --- Tool Tests
+
+#[tokio::test]
+#[serial(together)]
+async fn test_tool_simple_ok() -> TestResult<()> {
+	common_tests::common_test_tool_simple_ok(MODEL).await
+}
+
+// NOTE for now not working with Llama-3.3-70B-Instruct-Turbo
+// TODO: need to investigate
+#[tokio::test]
+#[serial(together)]
+async fn test_tool_full_flow_ok() -> TestResult<()> {
+	common_tests::common_test_tool_full_flow_ok(MODEL).await
+}
+
+// endregion: --- Tool Tests
+
 // region:    --- Resolver Tests
 
 #[tokio::test]
+#[serial(together)]
 async fn test_resolver_auth_ok() -> TestResult<()> {
-	common_tests::common_test_resolver_auth_ok(MODEL, AuthData::from_env("DEEPSEEK_API_KEY")).await
+	common_tests::common_test_resolver_auth_ok(MODEL, AuthData::from_env("TOGETHER_API_KEY")).await
 }
 
 // endregion: --- Resolver Tests
 
 // region:    --- List
 
-#[tokio::test]
-async fn test_list_models() -> TestResult<()> {
-	common_tests::common_test_list_models(AdapterKind::DeepSeek, "deepseek-chat").await
-}
-
-// when run this test, you need to set the DEEPSEEK_API_KEY environment variables
-// example:
-// linux: export DEEPSEEK_API_KEY="your-api-key" && cargo test --test tests_p_deepseek::test_all_models
-// windows: $env:DEEPSEEK_API_KEY="your-api-key"; cargo test --test tests_p_deepseek -- test_all_models
-#[tokio::test]
-async fn test_all_models() -> TestResult<()> {
-	common_tests::common_test_all_models(AdapterKind::DeepSeek, "deepseek-chat").await
-}
+// #[tokio::test]
+// #[serial(together)]
+// async fn test_list_models() -> TestResult<()> {
+// 	common_tests::common_test_list_models(AdapterKind::Together, "Qwen").await
+// }
 
 // endregion: --- List

@@ -1,6 +1,6 @@
 mod support;
 
-use crate::support::{Check, common_tests};
+use crate::support::{Check, TestResult, common_tests};
 use genai::adapter::AdapterKind;
 use genai::resolver::AuthData;
 
@@ -13,22 +13,22 @@ const VISION_MODEL: &str = "aya-vision-8b"; // For vision tests
 // region:    --- Chat
 
 #[tokio::test]
-async fn test_chat_simple_ok() -> Result<()> {
+async fn test_chat_simple_ok() -> TestResult<()> {
 	common_tests::common_test_chat_simple_ok(MODEL, None).await
 }
 
 #[tokio::test]
-async fn test_chat_namespaced_ok() -> Result<()> {
+async fn test_chat_namespaced_ok() -> TestResult<()> {
 	common_tests::common_test_chat_simple_ok(MODEL_NS, None).await
 }
 
 #[tokio::test]
-async fn test_chat_multi_system_ok() -> Result<()> {
+async fn test_chat_multi_system_ok() -> TestResult<()> {
 	common_tests::common_test_chat_multi_system_ok(MODEL).await
 }
 
 #[tokio::test]
-async fn test_chat_stop_sequences_ok() -> Result<()> {
+async fn test_chat_stop_sequences_ok() -> TestResult<()> {
 	common_tests::common_test_chat_stop_sequences_ok(MODEL).await
 }
 
@@ -47,24 +47,24 @@ async fn test_chat_json_structured_ok() -> Result<()> {
 // region:    --- Chat Stream Tests
 
 #[tokio::test]
-async fn test_chat_stream_simple_ok() -> Result<()> {
+async fn test_chat_stream_simple_ok() -> TestResult<()> {
 	common_tests::common_test_chat_stream_simple_ok(MODEL, None).await
 }
 
 // NOTE 2024-06-23 - Occasionally, the last stream message sent by Cohere is malformed and cannot be parsed.
 //                   Will investigate further if requested.
 // #[tokio::test]
-// async fn test_chat_stream_capture_content_ok() -> Result<()> {
+// async fn test_chat_stream_capture_content_ok() -> TestResult<()> {
 // 	common_tests::common_test_chat_stream_capture_content_ok(MODEL).await
 // }
 
 #[tokio::test]
-async fn test_chat_stream_capture_all_ok() -> Result<()> {
+async fn test_chat_stream_capture_all_ok() -> TestResult<()> {
 	common_tests::common_test_chat_stream_capture_all_ok(MODEL, None).await
 }
 
 #[tokio::test]
-async fn test_chat_temperature_ok() -> Result<()> {
+async fn test_chat_temperature_ok() -> TestResult<()> {
 	common_tests::common_test_chat_temperature_ok(MODEL).await
 }
 
@@ -101,7 +101,7 @@ async fn test_tool_full_flow_ok() -> Result<()> {
 // region:    --- Resolver Tests
 
 #[tokio::test]
-async fn test_resolver_auth_ok() -> Result<()> {
+async fn test_resolver_auth_ok() -> TestResult<()> {
 	common_tests::common_test_resolver_auth_ok(MODEL, AuthData::from_env("COHERE_API_KEY")).await
 }
 
@@ -110,7 +110,7 @@ async fn test_resolver_auth_ok() -> Result<()> {
 // region:    --- List
 
 #[tokio::test]
-async fn test_list_models() -> Result<()> {
+async fn test_list_models() -> TestResult<()> {
 	common_tests::common_test_list_models(AdapterKind::Cohere, "command-r-plus").await
 }
 

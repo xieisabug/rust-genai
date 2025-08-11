@@ -2,9 +2,9 @@ use crate::adapter::adapters::support::get_api_key;
 use crate::adapter::gemini::GeminiStreamer;
 use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{
-	ChatOptionsSet, ChatRequest, ChatResponse, ChatResponseFormat, ChatRole, ChatStream, ChatStreamResponse,
-	CompletionTokensDetails, ContentPart, ImageSource, MessageContent, PromptTokensDetails, ReasoningEffort, ToolCall,
-	Usage,
+	BinarySource, ChatOptionsSet, ChatRequest, ChatResponse, ChatResponseFormat, ChatRole, ChatStream,
+	ChatStreamResponse, CompletionTokensDetails, ContentPart, MessageContent, PromptTokensDetails, ReasoningEffort,
+	ToolCall, Usage,
 };
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::{WebResponse, WebStream};
@@ -197,6 +197,8 @@ impl Adapter for GeminiAdapter {
 			// If reasoning effort, turn the low, medium, budget ones into Budget
 			(model, Some(effort)) => {
 				let effort = match effort {
+					// -- for now, match minimal to Low (because zero is not supported by 2.5 pro)
+					ReasoningEffort::Minimal => ReasoningEffort::Budget(REASONING_LOW),
 					ReasoningEffort::Low => ReasoningEffort::Budget(REASONING_LOW),
 					ReasoningEffort::Medium => ReasoningEffort::Budget(REASONING_MEDIUM),
 					ReasoningEffort::High => ReasoningEffort::Budget(REASONING_HIGH),
@@ -509,15 +511,19 @@ impl GeminiAdapter {
 									.iter()
 									.map(|part| match part {
 										ContentPart::Text(text) => json!({"text": text.clone()}),
-										ContentPart::Image { content_type, source } => {
+										ContentPart::Binary {
+											name: _name,
+											content_type,
+											source,
+										} => {
 											match source {
-												ImageSource::Url(url) => json!({
+												BinarySource::Url(url) => json!({
 													"file_data": {
 														"mime_type": content_type,
 														"file_uri": url
 													}
 												}),
-												ImageSource::Base64(content) => json!({
+												BinarySource::Base64(content) => json!({
 													"inline_data": {
 														"mime_type": content_type,
 														"data": content

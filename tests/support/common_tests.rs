@@ -1,12 +1,12 @@
 use crate::get_option_value;
-use crate::support::data::{IMAGE_URL_JPG_DUCK, get_b64_duck};
+use crate::support::data::{IMAGE_URL_JPG_DUCK, get_b64_duck, get_b64_pdf};
 use crate::support::{
-	Check, Result, StreamExtract, assert_contains, contains_checks, extract_stream_end, get_big_content,
+	Check, StreamExtract, TestResult, assert_contains, contains_checks, extract_stream_end, get_big_content,
 	seed_chat_req_simple, seed_chat_req_tool_simple, validate_checks,
 };
 use genai::adapter::AdapterKind;
 use genai::chat::{
-	CacheControl, ChatMessage, ChatOptions, ChatRequest, ChatResponseFormat, ContentPart, ImageSource, JsonSpec, Tool,
+	BinarySource, CacheControl, ChatMessage, ChatOptions, ChatRequest, ChatResponseFormat, ContentPart, JsonSpec, Tool,
 	ToolResponse,
 };
 use genai::embed::EmbedOptions;
@@ -18,7 +18,7 @@ use value_ext::JsonValueExt;
 
 // region:    --- Chat
 
-pub async fn common_test_chat_simple_ok(model: &str, checks: Option<Check>) -> Result<()> {
+pub async fn common_test_chat_simple_ok(model: &str, checks: Option<Check>) -> TestResult<()> {
 	validate_checks(checks.clone(), Check::REASONING | Check::REASONING_USAGE)?;
 
 	// -- Setup & Fixtures
@@ -70,7 +70,7 @@ pub async fn common_test_chat_simple_ok(model: &str, checks: Option<Check>) -> R
 	Ok(())
 }
 
-pub async fn common_test_chat_multi_system_ok(model: &str) -> Result<()> {
+pub async fn common_test_chat_multi_system_ok(model: &str) -> TestResult<()> {
 	// -- Setup & Fixtures
 	let client = Client::default();
 	let chat_req = ChatRequest::new(vec![
@@ -102,7 +102,7 @@ pub async fn common_test_chat_multi_system_ok(model: &str) -> Result<()> {
 
 /// Test with JSON mode enabled. This is not a structured output test.
 /// - test_token: This is to avoid checking the token (due to an Ollama bug when in JSON mode, no token is returned)
-pub async fn common_test_chat_json_mode_ok(model: &str, checks: Option<Check>) -> Result<()> {
+pub async fn common_test_chat_json_mode_ok(model: &str, checks: Option<Check>) -> TestResult<()> {
 	validate_checks(checks.clone(), Check::USAGE)?;
 
 	// -- Setup & Fixtures
@@ -148,7 +148,7 @@ Reply in a JSON format."#,
 
 /// Test with JSON mode enabled. This is not a structured output test.
 /// - test_token: This is to avoid checking the token (due to an Ollama bug when in JSON mode, no token is returned)
-pub async fn common_test_chat_json_structured_ok(model: &str, checks: Option<Check>) -> Result<()> {
+pub async fn common_test_chat_json_structured_ok(model: &str, checks: Option<Check>) -> TestResult<()> {
 	validate_checks(checks.clone(), Check::USAGE)?;
 
 	// -- Setup & Fixtures
@@ -217,7 +217,7 @@ Reply in a JSON format."#,
 	Ok(())
 }
 
-pub async fn common_test_chat_temperature_ok(model: &str) -> Result<()> {
+pub async fn common_test_chat_temperature_ok(model: &str) -> TestResult<()> {
 	// -- Setup & Fixtures
 	let client = Client::default();
 	let chat_req = seed_chat_req_simple();
@@ -235,7 +235,7 @@ pub async fn common_test_chat_temperature_ok(model: &str) -> Result<()> {
 	Ok(())
 }
 
-pub async fn common_test_chat_stop_sequences_ok(model: &str) -> Result<()> {
+pub async fn common_test_chat_stop_sequences_ok(model: &str) -> TestResult<()> {
 	// -- Setup & Fixtures
 	let client = Client::default();
 	let chat_req = ChatRequest::from_user("What is the capital of England?");
@@ -255,7 +255,7 @@ pub async fn common_test_chat_stop_sequences_ok(model: &str) -> Result<()> {
 	Ok(())
 }
 
-pub async fn common_test_chat_reasoning_normalize_ok(model: &str) -> Result<()> {
+pub async fn common_test_chat_reasoning_normalize_ok(model: &str) -> TestResult<()> {
 	// -- Setup & Fixtures
 	let client = Client::builder()
 		.with_chat_options(ChatOptions::default().with_normalize_reasoning_content(true))
@@ -298,7 +298,7 @@ pub async fn common_test_chat_reasoning_normalize_ok(model: &str) -> Result<()> 
 
 // region:    --- Chat Implicit Cache
 
-pub async fn common_test_chat_cache_implicit_simple_ok(model: &str) -> Result<()> {
+pub async fn common_test_chat_cache_implicit_simple_ok(model: &str) -> TestResult<()> {
 	// -- Setup & Fixtures
 	let client = Client::default();
 	let big_content = get_big_content()?;
@@ -341,7 +341,7 @@ pub async fn common_test_chat_cache_implicit_simple_ok(model: &str) -> Result<()
 
 // region:    --- Chat Explicit Cache
 
-pub async fn common_test_chat_cache_explicit_user_ok(model: &str) -> Result<()> {
+pub async fn common_test_chat_cache_explicit_user_ok(model: &str) -> TestResult<()> {
 	// -- Setup & Fixtures
 	let client = Client::default();
 	let big_content = get_big_content()?;
@@ -380,7 +380,7 @@ pub async fn common_test_chat_cache_explicit_user_ok(model: &str) -> Result<()> 
 	Ok(())
 }
 
-pub async fn common_test_chat_cache_explicit_system_ok(model: &str) -> Result<()> {
+pub async fn common_test_chat_cache_explicit_system_ok(model: &str) -> TestResult<()> {
 	// -- Setup & Fixtures
 	let client = Client::default();
 	let big_content = get_big_content()?;
@@ -424,7 +424,7 @@ pub async fn common_test_chat_cache_explicit_system_ok(model: &str) -> Result<()
 
 // region:    --- Chat Stream Tests
 
-pub async fn common_test_chat_stream_simple_ok(model: &str, checks: Option<Check>) -> Result<()> {
+pub async fn common_test_chat_stream_simple_ok(model: &str, checks: Option<Check>) -> TestResult<()> {
 	validate_checks(checks.clone(), Check::REASONING)?;
 
 	// -- Setup & Fixtures
@@ -470,7 +470,7 @@ pub async fn common_test_chat_stream_simple_ok(model: &str, checks: Option<Check
 
 /// Check that the capture content flag does the capture
 /// NOTE: When checking for reasoning, the captured_reasoning_content should be None in this function
-pub async fn common_test_chat_stream_capture_content_ok(model: &str) -> Result<()> {
+pub async fn common_test_chat_stream_capture_content_ok(model: &str) -> TestResult<()> {
 	// -- Setup & Fixtures
 	let client = Client::builder()
 		.with_chat_options(ChatOptions::default().with_capture_content(true))
@@ -508,7 +508,7 @@ pub async fn common_test_chat_stream_capture_content_ok(model: &str) -> Result<(
 	Ok(())
 }
 
-pub async fn common_test_chat_stream_capture_all_ok(model: &str, checks: Option<Check>) -> Result<()> {
+pub async fn common_test_chat_stream_capture_all_ok(model: &str, checks: Option<Check>) -> TestResult<()> {
 	validate_checks(checks.clone(), Check::REASONING)?;
 
 	// -- Setup & Fixtures
@@ -572,9 +572,9 @@ pub async fn common_test_chat_stream_capture_all_ok(model: &str, checks: Option<
 
 // endregion: --- Chat Stream Tests
 
-// region:    --- Images
+// region:    --- Binaries
 
-pub async fn common_test_chat_image_url_ok(model: &str) -> Result<()> {
+pub async fn common_test_chat_image_url_ok(model: &str) -> TestResult<()> {
 	// -- Setup
 	let client = Client::default();
 
@@ -583,7 +583,7 @@ pub async fn common_test_chat_image_url_ok(model: &str) -> Result<()> {
 	// This is similar to sending initial system chat messages (which will be cumulative with system chat messages)
 	chat_req = chat_req.append_message(ChatMessage::user(vec![
 		ContentPart::from_text("What is in this picture?"),
-		ContentPart::from_image_url("image/jpeg", IMAGE_URL_JPG_DUCK),
+		ContentPart::from_binary_url(None, "image/jpeg", IMAGE_URL_JPG_DUCK),
 	]));
 	let chat_res = client.exec_chat(model, chat_req, None).await?;
 
@@ -594,7 +594,7 @@ pub async fn common_test_chat_image_url_ok(model: &str) -> Result<()> {
 	Ok(())
 }
 
-pub async fn common_test_chat_image_b64_ok(model: &str) -> Result<()> {
+pub async fn common_test_chat_image_b64_ok(model: &str) -> TestResult<()> {
 	// -- Setup
 	let client = Client::default();
 
@@ -603,8 +603,9 @@ pub async fn common_test_chat_image_b64_ok(model: &str) -> Result<()> {
 	// This is similar to sending initial system chat messages (which will be cumulative with system chat messages)
 	chat_req = chat_req.append_message(ChatMessage::user(vec![
 		ContentPart::from_text("What is in this picture?"),
-		ContentPart::from_image_base64("image/jpeg", get_b64_duck()?),
+		ContentPart::from_binary_base64(None, "image/jpeg", get_b64_duck()?),
 	]));
+
 	let chat_res = client.exec_chat(model, chat_req, None).await?;
 
 	// -- Check
@@ -614,13 +615,60 @@ pub async fn common_test_chat_image_b64_ok(model: &str) -> Result<()> {
 	Ok(())
 }
 
-// endregion: --- Images
+pub async fn common_test_chat_pdf_b64_ok(model: &str) -> TestResult<()> {
+	// -- Setup
+	let client = Client::default();
+
+	// -- Build & Exec
+	let mut chat_req = ChatRequest::default().with_system("Answer in one sentence");
+	// This is similar to sending initial system chat messages (which will be cumulative with system chat messages)
+	chat_req = chat_req.append_message(ChatMessage::user(vec![
+		ContentPart::from_text("What does this document talk about?"),
+		ContentPart::from_binary_base64(Some("small.pdf".to_string()), "application/pdf", get_b64_pdf()?),
+	]));
+
+	let chat_res = client.exec_chat(model, chat_req, None).await?;
+
+	// -- Check
+	let res = chat_res.first_text().ok_or("Should have text result")?;
+	assert_contains(res, "quantum");
+
+	Ok(())
+}
+
+pub async fn common_test_chat_multi_binary_b64_ok(model: &str) -> TestResult<()> {
+	// -- Setup
+	let client = Client::default();
+
+	// -- Build & Exec
+	let mut chat_req = ChatRequest::default().with_system("Answer in one sentence");
+	// This is similar to sending initial system chat messages (which will be cumulative with system chat messages)
+	chat_req = chat_req.append_message(ChatMessage::user(vec![
+		ContentPart::from_binary_base64(None, "image/jpeg", get_b64_duck()?),
+		ContentPart::from_binary_base64(Some("small.pdf".to_string()), "application/pdf", get_b64_pdf()?),
+	]));
+	chat_req = chat_req.append_message(ChatMessage::user(
+		"
+Can you tell me what those images and files are about. 
+	",
+	));
+
+	let chat_res = client.exec_chat(model, chat_req, None).await?;
+
+	// -- Check
+	let res = chat_res.first_text().ok_or("Should have text result")?;
+	assert_contains(res, "quantum");
+	assert_contains(res, "duck");
+
+	Ok(())
+}
+// endregion: --- Binaries
 
 // region:    --- Tools
 
 /// Just making the tool request, and checking the tool call response
 /// `complete_check` if for LLMs that are better at giving back the unit and weather.
-pub async fn common_test_tool_simple_ok(model: &str, complete_check: bool) -> Result<()> {
+pub async fn common_test_tool_simple_ok(model: &str) -> TestResult<()> {
 	// -- Setup & Fixtures
 	let client = Client::default();
 	let chat_req = seed_chat_req_tool_simple();
@@ -636,16 +684,12 @@ pub async fn common_test_tool_simple_ok(model: &str, complete_check: bool) -> Re
 	let tool_call = tool_calls.pop().ok_or("Should have at least one tool call")?;
 	assert_eq!(tool_call.fn_arguments.x_get_as::<&str>("city")?, "Paris");
 	assert_eq!(tool_call.fn_arguments.x_get_as::<&str>("country")?, "France");
-	if complete_check {
-		// Note: Not all LLM will output the weather (e.g. Anthropic Haiku)
-		assert_eq!(tool_call.fn_arguments.x_get_as::<&str>("unit")?, "C");
-	}
+	assert_eq!(tool_call.fn_arguments.x_get_as::<&str>("unit")?, "C");
 
 	Ok(())
 }
 
-/// `complete_check` if for LLMs that are better at giving back the unit and weather.
-pub async fn common_test_tool_full_flow_ok(model: &str, complete_check: bool) -> Result<()> {
+pub async fn common_test_tool_full_flow_ok(model: &str) -> TestResult<()> {
 	// -- Setup & Fixtures
 	let client = Client::default();
 	let mut chat_req = seed_chat_req_tool_simple();
@@ -671,14 +715,12 @@ pub async fn common_test_tool_full_flow_ok(model: &str, complete_check: bool) ->
 	let chat_res = client.exec_chat(model, chat_req.clone(), None).await?;
 
 	// -- Check
-	let content = chat_res.first_text().ok_or("Last response should be message")?.to_lowercase(); // lowercase because some models send "Sunny" and not "sunny"
+	// lowercase because some models send "Sunny" and not "sunny"
+	let content = chat_res.first_text().ok_or("Last response should be message")?.to_lowercase();
 
 	assert!(content.contains("paris"), "Should contain 'Paris'");
 	assert!(content.contains("32"), "Should contain '32'");
-	if complete_check {
-		// Note: Not all LLM will output the weather (e.g. Anthropic Haiku)
-		assert!(content.contains("sunny"), "Should contain 'sunny'");
-	}
+	assert!(content.contains("sunny"), "Should contain 'sunny'");
 
 	Ok(())
 }
@@ -687,7 +729,7 @@ pub async fn common_test_tool_full_flow_ok(model: &str, complete_check: bool) ->
 
 // region:    --- With Resolvers
 
-pub async fn common_test_resolver_auth_ok(model: &str, auth_data: AuthData) -> Result<()> {
+pub async fn common_test_resolver_auth_ok(model: &str, auth_data: AuthData) -> TestResult<()> {
 	// -- Setup & Fixtures
 	let auth_resolver = AuthResolver::from_resolver_fn(move |model_iden: ModelIden| Ok(Some(auth_data)));
 	let client = Client::builder().with_auth_resolver(auth_resolver).build();
@@ -709,7 +751,7 @@ pub async fn common_test_resolver_auth_ok(model: &str, auth_data: AuthData) -> R
 
 // region:    --- List
 
-pub async fn common_test_list_models(adapter_kind: AdapterKind, contains: &str) -> Result<()> {
+pub async fn common_test_list_models(adapter_kind: AdapterKind, contains: &str) -> TestResult<()> {
 	let client = Client::default();
 
 	// -- Exec
@@ -777,11 +819,11 @@ pub async fn common_test_all_models(adapter_kind: AdapterKind, expected_model_na
 
 // region:    --- Embeddings
 
-pub async fn common_test_embed_single_simple_ok(model: &str) -> Result<()> {
+pub async fn common_test_embed_single_simple_ok(model: &str) -> TestResult<()> {
 	common_test_embed_single_simple_ok_with_usage_check(model, true).await
 }
 
-pub async fn common_test_embed_single_simple_ok_with_usage_check(model: &str, expect_usage: bool) -> Result<()> {
+pub async fn common_test_embed_single_simple_ok_with_usage_check(model: &str, expect_usage: bool) -> TestResult<()> {
 	// -- Setup & Fixtures
 	let client = Client::default();
 	let text = "Hello, world!";
@@ -825,11 +867,14 @@ pub async fn common_test_embed_single_simple_ok_with_usage_check(model: &str, ex
 	Ok(())
 }
 
-pub async fn common_test_embed_single_with_options_ok(model: &str) -> Result<()> {
+pub async fn common_test_embed_single_with_options_ok(model: &str) -> TestResult<()> {
 	common_test_embed_single_with_options_ok_with_usage_check(model, true).await
 }
 
-pub async fn common_test_embed_single_with_options_ok_with_usage_check(model: &str, expect_usage: bool) -> Result<()> {
+pub async fn common_test_embed_single_with_options_ok_with_usage_check(
+	model: &str,
+	expect_usage: bool,
+) -> TestResult<()> {
 	// -- Setup & Fixtures
 	let client = Client::default();
 	let text = "Test with options";
@@ -865,11 +910,11 @@ pub async fn common_test_embed_single_with_options_ok_with_usage_check(model: &s
 	Ok(())
 }
 
-pub async fn common_test_embed_batch_simple_ok(model: &str) -> Result<()> {
+pub async fn common_test_embed_batch_simple_ok(model: &str) -> TestResult<()> {
 	common_test_embed_batch_simple_ok_with_usage_check(model, true).await
 }
 
-pub async fn common_test_embed_batch_simple_ok_with_usage_check(model: &str, expect_usage: bool) -> Result<()> {
+pub async fn common_test_embed_batch_simple_ok_with_usage_check(model: &str, expect_usage: bool) -> TestResult<()> {
 	// -- Setup & Fixtures
 	let client = Client::default();
 	let texts = vec!["First text".to_string(), "Second text".to_string(), "Third text".to_string()];
@@ -922,7 +967,7 @@ pub async fn common_test_embed_provider_specific_options_ok(
 	model: &str,
 	embedding_type: &str,
 	truncate: Option<&str>,
-) -> Result<()> {
+) -> TestResult<()> {
 	common_test_embed_provider_specific_options_ok_with_usage_check(model, embedding_type, truncate, true).await
 }
 
@@ -931,7 +976,7 @@ pub async fn common_test_embed_provider_specific_options_ok_with_usage_check(
 	embedding_type: &str,
 	truncate: Option<&str>,
 	expect_usage: bool,
-) -> Result<()> {
+) -> TestResult<()> {
 	// -- Setup & Fixtures
 	let client = Client::default();
 	let text = "Test with provider-specific options";
@@ -973,7 +1018,7 @@ pub async fn common_test_embed_provider_specific_options_ok_with_usage_check(
 	Ok(())
 }
 
-pub async fn common_test_embed_empty_batch_should_fail(model: &str) -> Result<()> {
+pub async fn common_test_embed_empty_batch_should_fail(model: &str) -> TestResult<()> {
 	// -- Setup & Fixtures
 	let client = Client::default();
 	let texts: Vec<String> = vec![];

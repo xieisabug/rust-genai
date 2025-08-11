@@ -98,14 +98,10 @@ impl futures::Stream for OpenAIStreamer {
 											.unwrap_or_default(); // permissive for now
 										self.captured_data.usage = Some(usage)
 									}
-									AdapterKind::DeepSeek => {
-										let usage = message_data
-											.x_take("usage")
-											.map(|v| OpenAIAdapter::into_usage(adapter_kind, v))
-											.unwrap_or_default();
-										self.captured_data.usage = Some(usage)
-									}
-									AdapterKind::Zhipu => {
+									AdapterKind::DeepSeek
+									| AdapterKind::Zhipu
+									| AdapterKind::Fireworks
+									| AdapterKind::Together => {
 										let usage = message_data
 											.x_take("usage")
 											.map(|v| OpenAIAdapter::into_usage(adapter_kind, v))
@@ -119,7 +115,9 @@ impl futures::Stream for OpenAIStreamer {
 							continue;
 						}
 						// -- Tool Call
-						else if let Ok(delta_tool_calls) = first_choice.x_take::<Value>("/delta/tool_calls") {
+						else if let Ok(delta_tool_calls) = first_choice.x_take::<Value>("/delta/tool_calls")
+							&& delta_tool_calls != Value::Null
+						{
 							// Check if there's a tool call in the delta
 							if delta_tool_calls.is_array() && !delta_tool_calls.as_array().unwrap().is_empty() {
 								// Extract the first tool call object as a mutable value
@@ -179,7 +177,7 @@ impl futures::Stream for OpenAIStreamer {
 						}
 						// -- Content
 						// If there is no finish_reason but there is some content, we can get the delta content and send the Internal Stream Event
-						else if let Some(content) = first_choice.x_take::<Option<String>>("/delta/content")? {
+						else if let Ok(Some(content)) = first_choice.x_take::<Option<String>>("/delta/content") {
 							// Add to the captured_content if chat options allow it
 							if self.options.capture_content {
 								match self.captured_data.content {
@@ -192,8 +190,8 @@ impl futures::Stream for OpenAIStreamer {
 							return Poll::Ready(Some(Ok(InterStreamEvent::Chunk(content))));
 						}
 						// -- Reasoning Content
-						else if let Some(reasoning_content) =
-							first_choice.x_take::<Option<String>>("/delta/reasoning_content")?
+						else if let Ok(Some(reasoning_content)) =
+							first_choice.x_take::<Option<String>>("/delta/reasoning_content")
 						{
 							// Add to the captured_content if chat options allow it
 							if self.options.capture_reasoning_content {

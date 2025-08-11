@@ -1,11 +1,12 @@
 mod support;
 
 use crate::support::{Check, TestResult, common_tests};
-use genai::adapter::AdapterKind;
 use genai::resolver::AuthData;
 
-const MODEL: &str = "deepseek-chat";
-const MODEL_NS: &str = "deepseek::deepseek-chat";
+// const MODEL: &str = "fireworks::qwen3-coder-480b-a35b-instruct";
+// const MODEL: &str = "fireworks::gpt-oss-120b";
+const MODEL: &str = "accounts/fireworks/models/llama4-maverick-instruct-basic";
+const MODEL_NS: &str = "fireworks::llama4-maverick-instruct-basic";
 
 // region:    --- Chat
 
@@ -35,11 +36,6 @@ async fn test_chat_json_structured_ok() -> TestResult<()> {
 }
 
 #[tokio::test]
-async fn test_chat_json_structured_ok() -> TestResult<()> {
-	common_tests::common_test_chat_json_structured_ok(MODEL, Some(Check::USAGE)).await
-}
-
-#[tokio::test]
 async fn test_chat_temperature_ok() -> TestResult<()> {
 	common_tests::common_test_chat_temperature_ok(MODEL).await
 }
@@ -51,19 +47,15 @@ async fn test_chat_stop_sequences_ok() -> TestResult<()> {
 
 // endregion: --- Chat
 
-// region:    --- Tool Tests
+// region:    --- Chat Implicit Cache
 
-#[tokio::test]
-async fn test_tool_simple_ok() -> Result<()> {
-	common_tests::common_test_tool_simple_ok(MODEL, true).await
-}
+/// Caching does not seem to be supported for fireworks (at leat not reported)
+// #[tokio::test]
+// async fn test_chat_cache_implicit_simple_ok() -> TestResult<()> {
+// 	common_tests::common_test_chat_cache_implicit_simple_ok(MODEL).await
+// }
 
-#[tokio::test]
-async fn test_tool_full_flow_ok() -> Result<()> {
-	common_tests::common_test_tool_full_flow_ok(MODEL, true).await
-}
-
-// endregion: --- Tool Tests
+// endregion: --- Chat Implicit Cache
 
 // region:    --- Chat Stream Tests
 
@@ -86,17 +78,17 @@ async fn test_chat_stream_capture_all_ok() -> TestResult<()> {
 
 // region:    --- Binary Tests
 
-// Deepseek.com does not seems to support those
+#[tokio::test]
+async fn test_chat_binary_image_url_ok() -> TestResult<()> {
+	common_tests::common_test_chat_image_url_ok(MODEL).await
+}
 
-// #[tokio::test]
-// async fn test_chat_binary_image_url_ok() -> TestResult<()> {
-// 	common_tests::common_test_chat_image_url_ok(MODEL).await
-// }
+#[tokio::test]
+async fn test_chat_binary_image_b64_ok() -> TestResult<()> {
+	common_tests::common_test_chat_image_b64_ok(MODEL).await
+}
 
-// #[tokio::test]
-// async fn test_chat_binary_image_b64_ok() -> TestResult<()> {
-// 	common_tests::common_test_chat_image_b64_ok(MODEL).await
-// }
+// PDF not supported for fireworks.ai
 
 // #[tokio::test]
 // async fn test_chat_binary_pdf_b64_ok() -> TestResult<()> {
@@ -110,29 +102,33 @@ async fn test_chat_stream_capture_all_ok() -> TestResult<()> {
 
 // endregion: --- Binary Tests
 
+// region:    --- Tool Tests
+
+#[tokio::test]
+async fn test_tool_simple_ok() -> TestResult<()> {
+	common_tests::common_test_tool_simple_ok(MODEL).await
+}
+
+#[tokio::test]
+async fn test_tool_full_flow_ok() -> TestResult<()> {
+	common_tests::common_test_tool_full_flow_ok(MODEL).await
+}
+// endregion: --- Tool Tests
+
 // region:    --- Resolver Tests
 
 #[tokio::test]
 async fn test_resolver_auth_ok() -> TestResult<()> {
-	common_tests::common_test_resolver_auth_ok(MODEL, AuthData::from_env("DEEPSEEK_API_KEY")).await
+	common_tests::common_test_resolver_auth_ok(MODEL, AuthData::from_env("FIREWORKS_API_KEY")).await
 }
 
 // endregion: --- Resolver Tests
 
 // region:    --- List
 
-#[tokio::test]
-async fn test_list_models() -> TestResult<()> {
-	common_tests::common_test_list_models(AdapterKind::DeepSeek, "deepseek-chat").await
-}
-
-// when run this test, you need to set the DEEPSEEK_API_KEY environment variables
-// example:
-// linux: export DEEPSEEK_API_KEY="your-api-key" && cargo test --test tests_p_deepseek::test_all_models
-// windows: $env:DEEPSEEK_API_KEY="your-api-key"; cargo test --test tests_p_deepseek -- test_all_models
-#[tokio::test]
-async fn test_all_models() -> TestResult<()> {
-	common_tests::common_test_all_models(AdapterKind::DeepSeek, "deepseek-chat").await
-}
+// #[tokio::test]
+// async fn test_list_models() -> TestResult<()> {
+// 	//common_tests::common_test_list_models(AdapterKind::Fireworks, "..").await
+// }
 
 // endregion: --- List
