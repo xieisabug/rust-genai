@@ -132,8 +132,10 @@ impl ModelCapabilities {
 			AdapterKind::Anthropic
 			| AdapterKind::Cohere
 			| AdapterKind::DeepSeek
+			| AdapterKind::Fireworks
 			| AdapterKind::Gemini
 			| AdapterKind::Groq
+			| AdapterKind::Together
 			| AdapterKind::Xai
 			| AdapterKind::Nebius
 			| AdapterKind::Ollama
@@ -147,7 +149,9 @@ impl ModelCapabilities {
 			AdapterKind::Cohere => Some(Self::cohere_supports_json_mode(model_id)),
 			AdapterKind::DeepSeek => Some(Self::deepseek_supports_json_mode(model_id)),
 			AdapterKind::Anthropic | AdapterKind::Gemini => Some(false),
-			AdapterKind::Groq
+			AdapterKind::Fireworks
+			| AdapterKind::Groq
+			| AdapterKind::Together
 			| AdapterKind::Xai
 			| AdapterKind::Nebius
 			| AdapterKind::Ollama
@@ -159,22 +163,22 @@ impl ModelCapabilities {
 		match kind {
 			AdapterKind::OpenAI => Some(Self::openai_supports_reasoning(model_id)),
 			AdapterKind::Anthropic => Some(
-				model_id.contains("claude-4") || model_id.contains("claude-opus-4") || model_id.contains("claude-sonnet-4")
+				model_id.contains("claude-4")
+					|| model_id.contains("claude-opus-4")
+					|| model_id.contains("claude-sonnet-4"),
 			),
 			AdapterKind::DeepSeek => Some(model_id.contains("reasoner")),
 			AdapterKind::Gemini => Some(model_id.contains("thinking") || model_id.contains("2.5")),
 			AdapterKind::Groq => Some(
-				model_id.contains("qwen3-32b") // Qwen 3 supports reasoning_effort parameter
+				model_id.contains("qwen3-32b"), // Qwen 3 supports reasoning_effort parameter
 			),
 			AdapterKind::Xai => Some(
 				// Only these xAI models support "通用推理" (general reasoning) according to official docs
-				model_id == "grok-4-0709" || 
-				model_id == "grok-3-mini" || 
-				model_id == "grok-3-mini-fast"
+				model_id == "grok-4-0709" || model_id == "grok-3-mini" || model_id == "grok-3-mini-fast",
 			),
 			AdapterKind::Zhipu => Some(
 				// Zhipu thinking models support reasoning according to official docs
-				model_id.contains("glm-4.5") && !model_id.contains("air")
+				model_id.contains("glm-4.5") && !model_id.contains("air"),
 			),
 			_ => None,
 		}
@@ -185,9 +189,12 @@ impl ModelCapabilities {
 			AdapterKind::Anthropic => {
 				let mut set = HashSet::from([Modality::Text]);
 				// Claude 3+、Claude 4+ 支持图像输入
-				if model_id.contains("claude-3") || model_id.contains("claude-4") 
-					|| model_id.contains("claude-opus-4") || model_id.contains("claude-sonnet-4")
-					|| model_id.contains("claude-2.1") {
+				if model_id.contains("claude-3")
+					|| model_id.contains("claude-4")
+					|| model_id.contains("claude-opus-4")
+					|| model_id.contains("claude-sonnet-4")
+					|| model_id.contains("claude-2.1")
+				{
 					set.insert(Modality::Image);
 				}
 				Some(set)
@@ -215,9 +222,10 @@ impl ModelCapabilities {
 			AdapterKind::Groq => {
 				let mut set = HashSet::from([Modality::Text]);
 				// Groq vision models support image input (verified 2025)
-				if model_id.contains("vision") || 
-				   model_id.contains("llama-3.2-90b") || 
-				   model_id.contains("llama-3.2-11b") {
+				if model_id.contains("vision")
+					|| model_id.contains("llama-3.2-90b")
+					|| model_id.contains("llama-3.2-11b")
+				{
 					set.insert(Modality::Image);
 				}
 				Some(set)
@@ -226,8 +234,7 @@ impl ModelCapabilities {
 				let mut set = HashSet::from([Modality::Text]);
 				// xAI models that support image input (verified from official docs 2025)
 				// Only grok-4-0709 and grok-2-vision-1212 support image input
-				if model_id == "grok-4-0709" || 
-				   model_id.contains("grok-2-vision-1212") {
+				if model_id == "grok-4-0709" || model_id.contains("grok-2-vision-1212") {
 					set.insert(Modality::Image);
 				}
 				Some(set)
@@ -256,7 +263,10 @@ impl ModelCapabilities {
 		match kind {
 			AdapterKind::OpenAI => Some(Self::openai_infer_reasoning_efforts(model_id)),
 			AdapterKind::Anthropic => {
-				if model_id.contains("claude-4") || model_id.contains("claude-opus-4") || model_id.contains("claude-sonnet-4") {
+				if model_id.contains("claude-4")
+					|| model_id.contains("claude-opus-4")
+					|| model_id.contains("claude-sonnet-4")
+				{
 					Some(vec![
 						ReasoningEffortType::Low,
 						ReasoningEffortType::Medium,
@@ -266,7 +276,7 @@ impl ModelCapabilities {
 				} else {
 					None
 				}
-			},
+			}
 			AdapterKind::Gemini | AdapterKind::DeepSeek => Some(vec![
 				ReasoningEffortType::Low,
 				ReasoningEffortType::Medium,
@@ -285,12 +295,10 @@ impl ModelCapabilities {
 				} else {
 					None
 				}
-			},
+			}
 			AdapterKind::Xai => {
 				// xAI reasoning models support effort control (verified from official docs 2025)
-				if model_id == "grok-4-0709" || 
-				   model_id == "grok-3-mini" || 
-				   model_id == "grok-3-mini-fast" {
+				if model_id == "grok-4-0709" || model_id == "grok-3-mini" || model_id == "grok-3-mini-fast" {
 					Some(vec![
 						ReasoningEffortType::Low,
 						ReasoningEffortType::Medium,
@@ -300,17 +308,15 @@ impl ModelCapabilities {
 				} else {
 					None
 				}
-			},
+			}
 			AdapterKind::Zhipu => {
 				// Zhipu thinking models support effort control (verified from official docs 2025)
 				if model_id.contains("glm-4.5") && !model_id.contains("air") {
-					Some(vec![
-						ReasoningEffortType::High,
-					])
+					Some(vec![ReasoningEffortType::High])
 				} else {
 					None
 				}
-			},
+			}
 			_ => None,
 		}
 	}
@@ -323,8 +329,10 @@ impl ModelCapabilities {
 			AdapterKind::Anthropic => Self::anthropic_token_limits(model_id),
 			AdapterKind::Cohere => Self::cohere_token_limits(model_id),
 			AdapterKind::DeepSeek => Self::deepseek_token_limits(model_id),
+			AdapterKind::Fireworks => Self::openai_specific_token_limits(model_id),
 			AdapterKind::Gemini => Self::gemini_token_limits(model_id),
 			AdapterKind::Groq => Self::groq_token_limits(model_id),
+			AdapterKind::Together => Self::openai_specific_token_limits(model_id),
 			AdapterKind::Xai => Self::xai_token_limits(model_id),
 			AdapterKind::Nebius => Self::nebius_token_limits(model_id),
 			AdapterKind::Ollama => Self::ollama_token_limits(model_id),
@@ -382,16 +390,16 @@ impl ModelCapabilities {
 			id if id.contains("aya-vision-8b") => (Some(128_000), Some(4_096)),
 			id if id.contains("aya-expanse-32b") => (Some(128_000), Some(8_192)),
 			id if id.contains("aya-expanse-8b") => (Some(128_000), Some(4_096)),
-			
+
 			// Command A series
 			id if id.contains("command-a-vision") => (Some(128_000), Some(4_096)),
 			id if id.contains("command-a") => (Some(128_000), Some(4_096)),
-			
+
 			// Command R series (latest versions with improved performance)
 			id if id.contains("command-r-plus") => (Some(128_000), Some(4_096)),
 			id if id.contains("command-r7b") => (Some(128_000), Some(4_096)),
 			id if id.contains("command-r") => (Some(128_000), Some(4_096)),
-			
+
 			// Legacy Command series
 			id if id.contains("command-light") => (Some(4_096), Some(4_096)),
 			id if id.contains("command-nightly") => (Some(4_096), Some(4_096)),
@@ -405,7 +413,7 @@ impl ModelCapabilities {
 		let res = match model_id {
 			// DeepSeek-R1-0528 (reasoning model) - 64K input, 8K output (reasoning tokens not counted)
 			"deepseek-reasoner" => (Some(64_000), Some(8_192)),
-			// DeepSeek-V3-0324 (general chat) - 64K input, 8K output  
+			// DeepSeek-V3-0324 (general chat) - 64K input, 8K output
 			"deepseek-chat" => (Some(64_000), Some(8_192)),
 			_ => return None,
 		};
@@ -418,25 +426,25 @@ impl ModelCapabilities {
 			id if id.contains("gemini-2.5-pro") => (Some(2_000_000), Some(32_768)), // 2M context (soon), 32K output
 			id if id.contains("gemini-2.5-flash") => (Some(1_000_000), Some(16_384)), // 1M context, 16K output
 			id if id.contains("gemini-2.5-flash-lite") => (Some(1_000_000), Some(8_192)), // 1M context, 8K output
-			
+
 			// Gemini 2.0 series - Next generation with native tool use
 			id if id.contains("gemini-2.0-flash") => (Some(1_000_000), Some(32_768)), // 1M context, 32K output
-			id if id.contains("gemini-2.0-flash-lite") => (Some(1_000_000), Some(16_384)), // 1M context, 16K output  
+			id if id.contains("gemini-2.0-flash-lite") => (Some(1_000_000), Some(16_384)), // 1M context, 16K output
 			id if id.contains("gemini-2.0-flash-live") => (Some(1_000_000), Some(8_192)), // 1M context, 8K output (live)
-			
+
 			// Legacy Gemini 1.5 series
 			id if id.contains("gemini-1.5-pro") => (Some(2_000_000), Some(8_192)), // 2M context, 8K output
 			id if id.contains("gemini-1.5-flash") => (Some(1_000_000), Some(8_192)), // 1M context, 8K output
-			
+
 			// Gemini 1.0 series
 			id if id.contains("gemini-1.0-pro") => (Some(30_720), Some(2_048)), // 30K context, 2K output
-			
+
 			// Experimental models
 			id if id.contains("gemini-exp") => (Some(2_000_000), Some(8_192)), // Experimental high context
-			
+
 			// Embedding models
 			id if id.contains("embedding") => (Some(2_048), Some(768)), // Embedding input/output dimensions
-			
+
 			_ => return None,
 		};
 		Some(res)
@@ -486,7 +494,7 @@ impl ModelCapabilities {
 			id if id.contains("llama-guard-3-8b") => (Some(8_192), Some(8_192)),
 			// Legacy Gemma 7B
 			id if id.contains("gemma-7b-it") => (Some(8_192), Some(8_192)),
-			
+
 			_ => return None,
 		};
 		Some(res)
@@ -496,21 +504,21 @@ impl ModelCapabilities {
 		let res = match model_id {
 			// --- Grok 4 Series (verified from official xAI docs) ---
 			"grok-4-0709" => (Some(256_000), Some(32_768)), // 256K context, estimate 32K output
-			
+
 			// --- Grok 3 Series (verified from official xAI docs) ---
-			"grok-3" => (Some(131_072), Some(32_768)),          // 131K context, estimate 32K output
-			"grok-3-mini" => (Some(131_072), Some(16_384)),     // 131K context, estimate 16K output
-			"grok-3-fast" => (Some(131_072), Some(32_768)),     // 131K context, estimate 32K output
+			"grok-3" => (Some(131_072), Some(32_768)), // 131K context, estimate 32K output
+			"grok-3-mini" => (Some(131_072), Some(16_384)), // 131K context, estimate 16K output
+			"grok-3-fast" => (Some(131_072), Some(32_768)), // 131K context, estimate 32K output
 			"grok-3-mini-fast" => (Some(131_072), Some(8_192)), // 131K context, estimate 8K output
-			
+
 			// --- Grok 2 Vision Series (verified from official xAI docs) ---
 			"grok-2-vision-1212" => (Some(32_768), Some(8_192)), // 32K context, estimate 8K output
-			
+
 			// --- Legacy/Generic Grok models ---
 			id if id.contains("grok-4") => (Some(256_000), Some(32_768)), // Fallback for grok-4 variants
-			id if id.contains("grok-3") => (Some(131_072), Some(32_768)), // Fallback for grok-3 variants  
+			id if id.contains("grok-3") => (Some(131_072), Some(32_768)), // Fallback for grok-3 variants
 			id if id.contains("grok") => (Some(131_072), Some(32_768)),   // Generic grok fallback
-			
+
 			_ => return None,
 		};
 		Some(res)
@@ -529,32 +537,32 @@ impl ModelCapabilities {
 	fn zhipu_token_limits(model_id: &str) -> Option<(Option<u32>, Option<u32>)> {
 		let res = match model_id {
 			// --- GLM-4.5 Series (verified from official docs 2025) ---
-			"glm-4.5" => (Some(128_000), Some(32_768)),        // 128K context, estimate 32K output
-			"glm-4.5-x" => (Some(128_000), Some(32_768)),      // 128K context, estimate 32K output
-			"glm-4.5-air" => (Some(128_000), Some(16_384)),    // 128K context, estimate 16K output (lightweight)
-			"glm-4.5-airx" => (Some(128_000), Some(16_384)),   // 128K context, estimate 16K output (lightweight)
-			"glm-4.5-flash" => (Some(128_000), Some(8_192)),   // 128K context, estimate 8K output (free tier)
-			
+			"glm-4.5" => (Some(128_000), Some(32_768)), // 128K context, estimate 32K output
+			"glm-4.5-x" => (Some(128_000), Some(32_768)), // 128K context, estimate 32K output
+			"glm-4.5-air" => (Some(128_000), Some(16_384)), // 128K context, estimate 16K output (lightweight)
+			"glm-4.5-airx" => (Some(128_000), Some(16_384)), // 128K context, estimate 16K output (lightweight)
+			"glm-4.5-flash" => (Some(128_000), Some(8_192)), // 128K context, estimate 8K output (free tier)
+
 			// --- GLM-4-32B Series ---
 			"glm-4-32b-0414-128k" => (Some(128_000), Some(32_768)), // 128K context, estimate 32K output
-			
+
 			// --- Legacy GLM-4 Series (maintaining existing configs) ---
 			id if id.starts_with("glm-4-plus") => (Some(128_000), Some(32_768)),
 			id if id.starts_with("glm-4-air") => (Some(128_000), Some(16_384)),
 			id if id.starts_with("glm-4-flash") => (Some(128_000), Some(8_192)),
 			id if id.starts_with("glm-4-long") => (Some(1_000_000), Some(32_768)), // Long context model
-			
+
 			// --- Vision Models ---
 			id if id.contains("4v") => (Some(128_000), Some(16_384)), // Vision models
-			
+
 			// --- Other Models ---
 			id if id.starts_with("glm-z1") => (Some(128_000), Some(16_384)),
 			id if id.contains("thinking") => (Some(128_000), Some(32_768)), // Thinking models
-			
+
 			// --- Generic fallback ---
 			id if id.starts_with("glm-4") => (Some(128_000), Some(16_384)),
 			id if id.starts_with("glm") => (Some(128_000), Some(8_192)),
-			
+
 			_ => return None,
 		};
 		Some(res)
@@ -669,7 +677,7 @@ impl ModelCapabilities {
 		// Command R and Command R+ series support tool calls
 		// Command A series also supports tool calls
 		// Aya series models support tool calls
-		model_id.contains("command-r") 
+		model_id.contains("command-r")
 			|| model_id.contains("command-a")
 			|| model_id.contains("command-nightly")
 			|| model_id.contains("aya-")

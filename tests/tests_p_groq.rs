@@ -41,11 +41,6 @@ async fn test_chat_json_structured_ok() -> TestResult<()> {
 }
 
 #[tokio::test]
-async fn test_chat_json_structured_ok() -> TestResult<()> {
-	common_tests::common_test_chat_json_structured_ok(MODEL, Some(Check::USAGE)).await
-}
-
-#[tokio::test]
 async fn test_chat_temperature_ok() -> TestResult<()> {
 	common_tests::common_test_chat_temperature_ok(MODEL).await
 }
@@ -82,12 +77,12 @@ const VISION_MODEL: &str = "llama-3.2-90b-vision-preview"; // Groq's most advanc
 const VISION_MODEL_FAST: &str = "llama-3.2-11b-vision-preview"; // Faster vision model
 
 #[tokio::test]
-async fn test_chat_image_b64_ok() -> Result<()> {
+async fn test_chat_image_b64_ok() -> TestResult<()> {
 	common_tests::common_test_chat_image_b64_ok(VISION_MODEL).await
 }
 
 #[tokio::test]
-async fn test_chat_image_b64_fast_ok() -> Result<()> {
+async fn test_chat_image_b64_fast_ok() -> TestResult<()> {
 	// Test with the faster vision model
 	common_tests::common_test_chat_image_b64_ok(VISION_MODEL_FAST).await
 }
@@ -97,13 +92,13 @@ async fn test_chat_image_b64_fast_ok() -> Result<()> {
 // region:    --- Tool Tests
 
 #[tokio::test]
-async fn test_tool_simple_ok() -> Result<()> {
-	common_tests::common_test_tool_simple_ok(MODEL, true).await
+async fn test_tool_simple_ok() -> TestResult<()> {
+	common_tests::common_test_tool_simple_ok(MODEL).await
 }
 
 #[tokio::test]
-async fn test_tool_full_flow_ok() -> Result<()> {
-	common_tests::common_test_tool_full_flow_ok(MODEL, true).await
+async fn test_tool_full_flow_ok() -> TestResult<()> {
+	common_tests::common_test_tool_full_flow_ok(MODEL).await
 }
 
 // endregion: --- Tool Tests
@@ -125,7 +120,7 @@ async fn test_list_models() -> TestResult<()> {
 }
 
 #[tokio::test]
-async fn test_all_models() -> Result<()> {
+async fn test_all_models() -> TestResult<()> {
 	common_tests::common_test_all_models(AdapterKind::Groq, "moonshotai/kimi-k2-instruct").await
 }
 

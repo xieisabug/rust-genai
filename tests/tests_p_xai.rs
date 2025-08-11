@@ -78,13 +78,13 @@ async fn test_chat_stream_capture_all_ok() -> TestResult<()> {
 #[tokio::test]
 #[serial(xai)]
 async fn test_tool_simple_ok() -> TestResult<()> {
-	common_tests::common_test_tool_simple_ok(MODEL, true).await
+	common_tests::common_test_tool_simple_ok(MODEL).await
 }
 
 #[tokio::test]
 #[serial(xai)]
 async fn test_tool_full_flow_ok() -> TestResult<()> {
-	common_tests::common_test_tool_full_flow_ok(MODEL, true).await
+	common_tests::common_test_tool_full_flow_ok(MODEL).await
 }
 
 // endregion: --- Tool Tests

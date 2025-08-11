@@ -4,8 +4,6 @@ use crate::support::{Check, TestResult, common_tests};
 use genai::adapter::AdapterKind;
 use genai::resolver::AuthData;
 
-type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>; // For tests.
-
 // Updated model references to use official models from Zhipu docs
 const MODEL: &str = "glm-4.5-air"; // Cost-effective model for general testing
 const MODEL_NS: &str = "zhipu::glm-4.5-air";

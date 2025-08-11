@@ -3,9 +3,6 @@ mod support;
 use crate::support::{Check, TestResult, common_tests};
 
 // "gemini-2.5-flash", "gemini-2.5-pro-preview"
-const MODEL: &str = "gemini-2.5-flash"; // can add "-medium" .. suffix
-
-// Updated to use latest stable Gemini 2.5 models with thinking capabilities
 const MODEL: &str = "gemini-2.5-flash"; // can add "-zero", "-low", "-medium", "-high" suffix
 const REASONING_MODEL: &str = "gemini-2.5-pro"; // Most advanced reasoning model
 

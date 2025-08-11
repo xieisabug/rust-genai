@@ -27,7 +27,7 @@ async fn test_chat_multi_system_ok() -> TestResult<()> {
 }
 
 #[tokio::test]
-async fn test_chat_json_mode_ok() -> Result<()> {
+async fn test_chat_json_mode_ok() -> TestResult<()> {
 	common_tests::common_test_chat_json_mode_ok(MODEL, Some(Check::USAGE)).await
 }
 
@@ -136,7 +136,7 @@ async fn test_list_models() -> TestResult<()> {
 }
 
 #[tokio::test]
-async fn test_all_models() -> Result<()> {
+async fn test_all_models() -> TestResult<()> {
 	common_tests::common_test_all_models(AdapterKind::Gemini, "gemini-2.5-flash").await
 }
 

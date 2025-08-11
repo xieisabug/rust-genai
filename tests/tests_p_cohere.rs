@@ -4,8 +4,6 @@ use crate::support::{Check, TestResult, common_tests};
 use genai::adapter::AdapterKind;
 use genai::resolver::AuthData;
 
-type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>; // For tests.
-
 const MODEL: &str = "command-r"; // Updated to use more capable model
 const MODEL_NS: &str = "cohere::command-r";
 const VISION_MODEL: &str = "aya-vision-8b"; // For vision tests
@@ -33,12 +31,12 @@ async fn test_chat_stop_sequences_ok() -> TestResult<()> {
 }
 
 #[tokio::test]
-async fn test_chat_json_mode_ok() -> Result<()> {
+async fn test_chat_json_mode_ok() -> TestResult<()> {
 	common_tests::common_test_chat_json_mode_ok(MODEL, Some(Check::USAGE)).await
 }
 
 #[tokio::test]
-async fn test_chat_json_structured_ok() -> Result<()> {
+async fn test_chat_json_structured_ok() -> TestResult<()> {
 	common_tests::common_test_chat_json_structured_ok(MODEL, Some(Check::USAGE)).await
 }
 
@@ -73,12 +71,12 @@ async fn test_chat_temperature_ok() -> TestResult<()> {
 // region:    --- Image Tests
 
 #[tokio::test]
-async fn test_chat_image_url_ok() -> Result<()> {
+async fn test_chat_image_url_ok() -> TestResult<()> {
 	common_tests::common_test_chat_image_url_ok(VISION_MODEL).await
 }
 
 #[tokio::test]
-async fn test_chat_image_b64_ok() -> Result<()> {
+async fn test_chat_image_b64_ok() -> TestResult<()> {
 	common_tests::common_test_chat_image_b64_ok(VISION_MODEL).await
 }
 
@@ -87,13 +85,13 @@ async fn test_chat_image_b64_ok() -> Result<()> {
 // region:    --- Tool Tests
 
 #[tokio::test]
-async fn test_tool_simple_ok() -> Result<()> {
-	common_tests::common_test_tool_simple_ok(MODEL, true).await
+async fn test_tool_simple_ok() -> TestResult<()> {
+	common_tests::common_test_tool_simple_ok(MODEL).await
 }
 
 #[tokio::test]
-async fn test_tool_full_flow_ok() -> Result<()> {
-	common_tests::common_test_tool_full_flow_ok(MODEL, true).await
+async fn test_tool_full_flow_ok() -> TestResult<()> {
+	common_tests::common_test_tool_full_flow_ok(MODEL).await
 }
 
 // endregion: --- Tool Tests
@@ -119,7 +117,7 @@ async fn test_list_models() -> TestResult<()> {
 // linux: export COHERE_API_KEY="your-api-key" && cargo test --test tests_p_cohere::test_all_models
 // windows: $env:COHERE_API_KEY="your-api-key"; cargo test --test tests_p_cohere -- test_all_models
 #[tokio::test]
-async fn test_all_models() -> Result<()> {
+async fn test_all_models() -> TestResult<()> {
 	common_tests::common_test_all_models(AdapterKind::Cohere, "command-r").await
 }
 

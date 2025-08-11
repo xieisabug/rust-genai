@@ -146,7 +146,7 @@ async fn test_list_models() -> TestResult<()> {
 // linux: export OPENAI_BASE_URL="https://xxxx/v1/" && export OPENAI_API_KEY="sk-proj-1234567890" && cargo test --test tests_p_openai::test_all_models
 // windows: $env:OPENAI_BASE_URL="https://xxxx/v1/"; $env:OPENAI_API_KEY="sk-proj-1234567890"; cargo test --test tests_p_openai -- test_all_models
 #[tokio::test]
-async fn test_all_models() -> Result<()> {
+async fn test_all_models() -> TestResult<()> {
 	common_tests::common_test_all_models(AdapterKind::OpenAI, "gpt-4o-mini").await
 }
 

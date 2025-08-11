@@ -763,7 +763,7 @@ pub async fn common_test_list_models(adapter_kind: AdapterKind, contains: &str) 
 	Ok(())
 }
 
-pub async fn common_test_all_models(adapter_kind: AdapterKind, expected_model_name: &str) -> Result<()> {
+pub async fn common_test_all_models(adapter_kind: AdapterKind, expected_model_name: &str) -> TestResult<()> {
 	// -- Build the new client with this adapter_config
 	let client = Client::builder().build();
 

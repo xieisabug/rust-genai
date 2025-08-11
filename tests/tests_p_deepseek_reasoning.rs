@@ -4,8 +4,6 @@ use crate::support::{Check, TestResult, common_tests};
 use genai::adapter::AdapterKind;
 use genai::resolver::AuthData;
 
-type Result<T> = core::result::Result<T, Box<dyn std::error::Error>>; // For tests.
-
 // deepseek-reasoner (DeepSeek-R1-0528 - supports JSON output, function calling, and streaming)
 const MODEL: &str = "deepseek-reasoner";
 
@@ -52,13 +50,13 @@ async fn test_chat_reasoning_normalize_ok() -> TestResult<()> {
 // region:    --- Tool Tests
 
 #[tokio::test]
-async fn test_tool_simple_ok() -> Result<()> {
-	common_tests::common_test_tool_simple_ok(MODEL, true).await
+async fn test_tool_simple_ok() -> TestResult<()> {
+	common_tests::common_test_tool_simple_ok(MODEL).await
 }
 
 #[tokio::test]
-async fn test_tool_full_flow_ok() -> Result<()> {
-	common_tests::common_test_tool_full_flow_ok(MODEL, true).await
+async fn test_tool_full_flow_ok() -> TestResult<()> {
+	common_tests::common_test_tool_full_flow_ok(MODEL).await
 }
 
 // endregion: --- Tool Tests

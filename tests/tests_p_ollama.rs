@@ -112,7 +112,7 @@ async fn test_list_models() -> TestResult<()> {
 
 /// NOTE this test assume the "gemma3:4b" is present.
 #[tokio::test]
-async fn test_all_models() -> Result<()> {
+async fn test_all_models() -> TestResult<()> {
 	common_tests::common_test_all_models(AdapterKind::Ollama, "mistral-small3.2:latest").await
 }
 

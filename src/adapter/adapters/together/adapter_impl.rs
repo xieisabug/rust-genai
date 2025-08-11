@@ -1,4 +1,4 @@
-use crate::ModelIden;
+use crate::{Model, ModelIden};
 use crate::adapter::openai::OpenAIAdapter;
 use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse};
@@ -30,6 +30,13 @@ impl Adapter for TogetherAdapter {
 
 	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
+	}
+
+	async fn all_models(_kind: AdapterKind, _target: ServiceTarget) -> Result<Vec<Model>> {
+		// For together, there are too many models to list.
+		// The models are handled dynamically based on the model name.
+		// Return empty vector for now since the MODELS constant is empty.
+		Ok(Vec::new())
 	}
 
 	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> String {

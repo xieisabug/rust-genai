@@ -152,7 +152,7 @@ async fn test_list_models() -> TestResult<()> {
 }
 
 #[tokio::test]
-async fn test_all_models() -> Result<()> {
+async fn test_all_models() -> TestResult<()> {
 	common_tests::common_test_all_models(AdapterKind::Anthropic, "claude-4-sonnet").await
 }
 

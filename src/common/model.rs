@@ -273,6 +273,7 @@ impl ReasoningEffortType {
 	/// Convert from ReasoningEffort.
 	pub fn from_reasoning_effort(effort: &ReasoningEffort) -> Self {
 		match effort {
+			ReasoningEffort::Minimal => ReasoningEffortType::Low,
 			ReasoningEffort::Low => ReasoningEffortType::Low,
 			ReasoningEffort::Medium => ReasoningEffortType::Medium,
 			ReasoningEffort::High => ReasoningEffortType::High,

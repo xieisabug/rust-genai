@@ -1,5 +1,4 @@
 use super::groq::GroqAdapter;
-use crate::ModelIden;
 use crate::adapter::adapters::together::TogetherAdapter;
 use crate::adapter::anthropic::AnthropicAdapter;
 use crate::adapter::cohere::CohereAdapter;
@@ -91,6 +90,8 @@ impl AdapterDispatcher {
 			AdapterKind::Xai => XaiAdapter::all_models(kind, target).await,
 			AdapterKind::DeepSeek => DeepSeekAdapter::all_models(kind, target).await,
 			AdapterKind::Zhipu => ZhipuAdapter::all_models(kind, target).await,
+			AdapterKind::Fireworks => FireworksAdapter::all_models(kind, target).await,
+			AdapterKind::Together => TogetherAdapter::all_models(kind, target).await,
 		}
 	}
 
