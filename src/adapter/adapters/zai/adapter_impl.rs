@@ -1,9 +1,10 @@
-use crate::ModelIden;
+use crate::adapter::ModelCapabilities;
 use crate::adapter::openai::OpenAIAdapter;
 use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse};
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
+use crate::{Model, ModelIden, ModelName};
 use crate::{Result, ServiceTarget};
 use reqwest::RequestBuilder;
 
@@ -37,25 +38,31 @@ impl ZaiModelEndpoint {
 ///
 pub struct ZaiAdapter;
 
+// Updated Zhipu AI model list based on official documentation (2025) - newer on top
 pub(in crate::adapter) const MODELS: &[&str] = &[
+	// --- GLM-4.5 Series (Latest, verified from official docs) ---
+	"glm-4.5",       // High Performance, Strong Reasoning, More Versatile
+	"glm-4.5-x",     // High Performance, Strong Reasoning, Ultra-Fast Response
+	"glm-4.5-air",   // Cost-Effective, Lightweight, High Performance
+	"glm-4.5-airx",  // Lightweight, High Performance, Ultra-Fast Response
+	"glm-4.5-flash", // Lightweight, High Performance, FREE
+	// --- GLM-4-32B Series ---
+	"glm-4-32b-0414-128k", // High intelligence at unmatched cost-efficiency
+	// --- Legacy GLM-4 Series (maintaining backward compatibility) ---
 	"glm-4-plus",
 	"glm-4.6",
-	"glm-4.5",
 	"glm-4.5v",
-	"glm-4.5-x",
-	"glm-4.5-air",
-	"glm-4.5-airx",
-	"glm-4-32b-0414-128k",
-	"glm-4.5-flash",
 	"glm-4-air-250414",
 	"glm-4-flashx-250414",
 	"glm-4-flash-250414",
 	"glm-4-air",
 	"glm-4-airx",
-	"glm-4-long",
 	"glm-4-flash",
+	"glm-4-long",
+	// --- Vision Models ---
 	"glm-4v-plus-0111",
 	"glm-4v-flash",
+	// --- Legacy/Other Models ---
 	"glm-z1-air",
 	"glm-z1-airx",
 	"glm-z1-flash",
@@ -83,14 +90,22 @@ impl Adapter for ZaiAdapter {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 
-	fn get_service_url(_model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
-		// For ZAI, we need to handle model-specific routing at this level
-		// because get_service_url is called with the modified endpoint from to_web_request_data
-		let base_url = endpoint.base_url();
+	async fn all_models(_kind: AdapterKind, _target: ServiceTarget) -> Result<Vec<Model>> {
+		// ZAI doesn't have a models endpoint; build from hardcoded list
+		let mut models: Vec<Model> = Vec::new();
+		for model_id in MODELS {
+			let model = Self::parse_zai_model_to_model(model_id.to_string())?;
+			models.push(model);
+		}
+		Ok(models)
+	}
 
+	fn get_service_url(_model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
+		let base_url = endpoint.base_url();
 		let url = match service_type {
 			ServiceType::Chat | ServiceType::ChatStream => format!("{base_url}chat/completions"),
 			ServiceType::Embed => format!("{base_url}embeddings"),
+			ServiceType::Models => format!("{base_url}models"), // Might not be supported; placeholder
 		};
 		Ok(url)
 	}
@@ -143,3 +158,46 @@ impl Adapter for ZaiAdapter {
 		OpenAIAdapter::to_embed_response(model_iden, web_response, options_set)
 	}
 }
+
+// region:    --- Support Functions
+
+
+/// Support functions for ZaiAdapter
+impl ZaiAdapter {
+	/// Convert a Zai (GLM) model ID to a complete Model object with capabilities
+	fn parse_zai_model_to_model(model_id: String) -> Result<Model> {
+		let model_name: ModelName = model_id.clone().into();
+		let mut model = Model::new(model_name, model_id.clone());
+
+		// Set Zai model capabilities using the ModelCapabilities system
+		let (max_input_tokens, max_output_tokens) =
+			ModelCapabilities::infer_token_limits(AdapterKind::Zai, &model_id);
+		let supports_reasoning = ModelCapabilities::supports_reasoning(AdapterKind::Zai, &model_id);
+
+		model = model
+			.with_max_input_tokens(max_input_tokens)
+			.with_max_output_tokens(max_output_tokens)
+			.with_streaming(ModelCapabilities::supports_streaming(AdapterKind::Zai, &model_id))
+			.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Zai, &model_id))
+			.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Zai, &model_id))
+			.with_reasoning(supports_reasoning);
+
+		// Set input/output modalities
+		let input_modalities = ModelCapabilities::infer_input_modalities(AdapterKind::Zai, &model_id);
+		let output_modalities = ModelCapabilities::infer_output_modalities(AdapterKind::Zai, &model_id);
+
+		model = model
+			.with_input_modalities(input_modalities)
+			.with_output_modalities(output_modalities);
+
+		// If supports reasoning, set reasoning effort levels
+		if supports_reasoning {
+			let reasoning_efforts = ModelCapabilities::infer_reasoning_efforts(AdapterKind::Zai, &model_id);
+			model = model.with_reasoning_efforts(reasoning_efforts);
+		}
+
+		Ok(model)
+	}
+}
+
+// endregion: --- Support Functions

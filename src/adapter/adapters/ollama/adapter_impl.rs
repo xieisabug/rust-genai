@@ -1,11 +1,12 @@
 //! API DOC: https://github.com/ollama/ollama/blob/main/docs/openai.md
 
+use crate::adapter::ModelCapabilities;
 use crate::adapter::openai::OpenAIAdapter;
 use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse};
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
-use crate::{Error, Result};
+use crate::{Error, Model, Result};
 use crate::{ModelIden, ServiceTarget};
 use reqwest::RequestBuilder;
 use serde_json::Value;
@@ -54,6 +55,70 @@ impl Adapter for OllamaAdapter {
 		} else {
 			// TODO: Need to add tracing
 			// error!("OllamaAdapter::list_models did not have any models {res:?}");
+		}
+
+		Ok(models)
+	}
+
+	async fn all_models(adapter_kind: AdapterKind, target: ServiceTarget) -> Result<Vec<Model>> {
+		// FIXME: This is hardcoded to the default endpoint; it should take the endpoint as an argument.
+		let endpoint = target.endpoint;
+		let base_url = endpoint.base_url();
+		let url = format!("{base_url}models");
+
+		// TODO: Need to get the WebClient from the client.
+		let web_c = crate::webc::WebClient::default();
+		let mut res = web_c.do_get(&url, &[]).await.map_err(|webc_error| Error::WebAdapterCall {
+			adapter_kind,
+			webc_error,
+		})?;
+
+		let mut models: Vec<Model> = Vec::new();
+
+		if let Value::Array(models_value) = res.body.x_take("data")? {
+			for mut model_data in models_value {
+				let model_id: String = model_data.x_take("id")?;
+
+				// 为 Ollama 模型创建基本的模型信息
+				let model_name: crate::ModelName = model_id.clone().into();
+				let mut model = Model::new(model_name, model_id.clone());
+
+				// 设置 Ollama 模型的通用特性（因为是本地运行，能力更加灵活）
+				let (max_input_tokens, max_output_tokens) =
+					ModelCapabilities::infer_token_limits(AdapterKind::Ollama, &model_id.clone());
+				model = model
+					.with_max_input_tokens(max_input_tokens)
+					.with_max_output_tokens(max_output_tokens)
+					.with_input_modalities(ModelCapabilities::infer_input_modalities(
+						AdapterKind::Ollama,
+						&model_id,
+					))
+					.with_output_modalities(ModelCapabilities::infer_output_modalities(
+						AdapterKind::Ollama,
+						&model_id,
+					))
+					.with_reasoning(ModelCapabilities::supports_reasoning(AdapterKind::Ollama, &model_id))
+					.with_reasoning_efforts(ModelCapabilities::infer_reasoning_efforts(
+						AdapterKind::Ollama,
+						&model_id,
+					))
+					.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Ollama, &model_id))
+					.with_streaming(ModelCapabilities::supports_streaming(AdapterKind::Ollama, &model_id))
+					.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Ollama, &model_id))
+					.with_additional_properties(model_data);
+
+				// 设置输入输出模态
+				let input_modalities = ModelCapabilities::infer_input_modalities(AdapterKind::Ollama, &model_id);
+				let output_modalities = ModelCapabilities::infer_output_modalities(AdapterKind::Ollama, &model_id);
+
+				model = model
+					.with_input_modalities(input_modalities)
+					.with_output_modalities(output_modalities);
+
+				models.push(model);
+			}
+		} else {
+			tracing::error!("OllamaAdapter::all_models did not have any models {res:?}");
 		}
 
 		Ok(models)

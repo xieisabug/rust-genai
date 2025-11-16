@@ -16,7 +16,7 @@ use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse}
 use crate::embed::{EmbedOptionsSet, EmbedRequest, EmbedResponse};
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
-use crate::{Error, ModelIden};
+use crate::{Error, Model, ModelIden};
 use crate::{Result, ServiceTarget};
 use reqwest::RequestBuilder;
 
@@ -79,6 +79,24 @@ impl AdapterDispatcher {
 			AdapterKind::Zai => ZaiAdapter::all_model_names(kind).await,
 			AdapterKind::Cohere => CohereAdapter::all_model_names(kind).await,
 			AdapterKind::Ollama => OllamaAdapter::all_model_names(kind).await,
+		}
+	}
+
+	pub async fn all_models(kind: AdapterKind, target: ServiceTarget) -> Result<Vec<Model>> {
+		match kind {
+			AdapterKind::OpenAI => OpenAIAdapter::all_models(kind, target).await,
+			AdapterKind::OpenAIResp => OpenAIRespAdapter::all_models(kind, target).await,
+			AdapterKind::Anthropic => AnthropicAdapter::all_models(kind, target).await,
+			AdapterKind::Cohere => CohereAdapter::all_models(kind, target).await,
+			AdapterKind::Ollama => OllamaAdapter::all_models(kind, target).await,
+			AdapterKind::Gemini => GeminiAdapter::all_models(kind, target).await,
+			AdapterKind::Groq => GroqAdapter::all_models(kind, target).await,
+			AdapterKind::Nebius => NebiusAdapter::all_models(kind, target).await,
+			AdapterKind::Xai => XaiAdapter::all_models(kind, target).await,
+			AdapterKind::DeepSeek => DeepSeekAdapter::all_models(kind, target).await,
+			AdapterKind::Zai => ZaiAdapter::all_models(kind, target).await,
+			AdapterKind::Fireworks => FireworksAdapter::all_models(kind, target).await,
+			AdapterKind::Together => TogetherAdapter::all_models(kind, target).await,
 		}
 	}
 

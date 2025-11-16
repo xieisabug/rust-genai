@@ -1,5 +1,4 @@
 use crate::adapter::adapters::support::get_api_key;
-use crate::adapter::model_capabilities::ModelCapabilities;
 use crate::adapter::openai::OpenAIStreamer;
 use crate::adapter::openai::ToWebRequestCustom;
 use crate::adapter::{Adapter, AdapterDispatcher, AdapterKind, ServiceType, WebRequestData};
@@ -8,16 +7,14 @@ use crate::chat::{
 	BinarySource, ChatOptionsSet, ChatRequest, ChatResponse, ChatResponseFormat, ChatRole, ChatStream,
 	ChatStreamResponse, ContentPart, MessageContent, ReasoningEffort, ToolCall, Usage,
 };
-use crate::common::{Modality, ReasoningEffortType};
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
-use crate::{Error, Headers, Model, Result};
+use crate::{Error, Headers, Result};
 use crate::{ModelIden, ServiceTarget};
 use reqwest::RequestBuilder;
 use reqwest_eventsource::EventSource;
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::HashSet;
 use tracing::error;
 use tracing::warn;
 use value_ext::JsonValueExt;
@@ -39,93 +36,6 @@ const MODELS: &[&str] = &[
 
 impl OpenAIAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "OPENAI_API_KEY";
-	pub const BASE_URL_DEFAULT_ENV_NAME: &str = "OPENAI_BASE_URL";
-
-	/// 将 OpenAI API 返回的模型数据转换为统一的 Model 结构
-	fn parse_openai_model_to_model(model_id: String, mut model_data: Value) -> Result<Model> {
-		let model_name: crate::ModelName = model_id.clone().into();
-
-		// 从 OpenAI API 获取的基本信息
-		let _created: Option<u64> = model_data.x_take("created").ok();
-		let _owned_by: Option<String> = model_data.x_take("owned_by").ok();
-
-		// 根据模型名称推断能力和限制
-		let mut model = Model::new(model_name, model_id.clone());
-
-		// 根据模型名称设置 token 限制
-		let (max_input_tokens, max_output_tokens) = Self::infer_token_limits(&model_id);
-		model = model
-			.with_max_input_tokens(max_input_tokens)
-			.with_max_output_tokens(max_output_tokens);
-
-		// 设置支持的功能
-		let supports_streaming = Self::supports_streaming(&model_id);
-		let supports_tool_calls = Self::supports_tool_calls(&model_id);
-		let supports_json_mode = Self::supports_json_mode(&model_id);
-		let supports_reasoning = Self::supports_reasoning(&model_id);
-
-		model = model
-			.with_streaming(supports_streaming)
-			.with_tool_calls(supports_tool_calls)
-			.with_json_mode(supports_json_mode)
-			.with_reasoning(supports_reasoning);
-
-		// 设置支持的模态
-		let input_modalities = Self::infer_input_modalities(&model_id);
-		let output_modalities = Self::infer_output_modalities(&model_id);
-
-		model = model
-			.with_input_modalities(input_modalities)
-			.with_output_modalities(output_modalities);
-
-		// 设置推理能力等级
-		if supports_reasoning {
-			let reasoning_efforts = Self::infer_reasoning_efforts(&model_id);
-			model = model.with_reasoning_efforts(reasoning_efforts);
-		}
-
-		Ok(model)
-	}
-
-	/// 根据模型名称推断 token 限制
-	fn infer_token_limits(model_id: &str) -> (Option<u32>, Option<u32>) {
-		ModelCapabilities::infer_token_limits(AdapterKind::OpenAI, model_id)
-	}
-
-	/// 根据模型名称推断是否支持流式输出
-	fn supports_streaming(model_id: &str) -> bool {
-		ModelCapabilities::supports_streaming(AdapterKind::OpenAI, model_id)
-	}
-
-	/// 根据模型名称推断是否支持工具调用
-	fn supports_tool_calls(model_id: &str) -> bool {
-		ModelCapabilities::supports_tool_calls(AdapterKind::OpenAI, model_id)
-	}
-
-	/// 根据模型名称推断是否支持 JSON 模式
-	fn supports_json_mode(model_id: &str) -> bool {
-		ModelCapabilities::supports_json_mode(AdapterKind::OpenAI, model_id)
-	}
-
-	/// 根据模型名称推断是否支持推理模式
-	fn supports_reasoning(model_id: &str) -> bool {
-		ModelCapabilities::supports_reasoning(AdapterKind::OpenAI, model_id)
-	}
-
-	/// 根据模型名称推断支持的输入模态
-	fn infer_input_modalities(model_id: &str) -> HashSet<Modality> {
-		ModelCapabilities::infer_input_modalities(AdapterKind::OpenAI, model_id)
-	}
-
-	/// 根据模型名称推断支持的输出模态  
-	fn infer_output_modalities(model_id: &str) -> HashSet<Modality> {
-		ModelCapabilities::infer_output_modalities(AdapterKind::OpenAI, model_id)
-	}
-
-	/// 根据模型名称推断支持的推理努力等级
-	fn infer_reasoning_efforts(model_id: &str) -> Vec<ReasoningEffortType> {
-		ModelCapabilities::infer_reasoning_efforts(AdapterKind::OpenAI, model_id)
-	}
 }
 
 impl Adapter for OpenAIAdapter {
@@ -135,62 +45,12 @@ impl Adapter for OpenAIAdapter {
 
 	fn default_endpoint() -> Endpoint {
 		const BASE_URL: &str = "https://api.openai.com/v1/";
-		let mut base_url = std::env::var(Self::BASE_URL_DEFAULT_ENV_NAME).unwrap_or_else(|_| BASE_URL.to_string());
-
-		// 确保 base_url 以 / 结尾
-		if !base_url.ends_with('/') {
-			base_url.push('/');
-		}
-
-		Endpoint::from_owned(base_url)
+		Endpoint::from_static(BASE_URL)
 	}
 
 	/// Note: Currently returns the common models (see above)
 	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
-	}
-
-	async fn all_models(kind: AdapterKind, target: ServiceTarget) -> Result<Vec<Model>> {
-		// 使用默认的认证和端点配置
-		let auth = target.auth;
-		let endpoint = target.endpoint;
-
-		// 构建一个临时的 ModelIden 用于获取服务 URL
-		let model_iden = ModelIden::new(kind, "temp");
-
-		// 获取 models API 的 URL
-		let url = Self::util_get_service_url(&model_iden, ServiceType::Models, endpoint)?;
-
-		// 获取 API key
-		let api_key = get_api_key(auth, &model_iden)?;
-
-		// 构建请求头
-		let headers = vec![("Authorization".to_string(), format!("Bearer {api_key}"))];
-
-		// 创建 WebClient 并发送请求
-		let web_client = crate::webc::WebClient::default();
-		let mut web_response = web_client
-			.do_get(&url, &headers)
-			.await
-			.map_err(|webc_error| Error::WebAdapterCall {
-				adapter_kind: kind,
-				webc_error,
-			})?;
-
-		// 解析响应
-		let mut models: Vec<Model> = Vec::new();
-
-		if let Value::Array(models_data) = web_response.body.x_take("data")? {
-			for mut model_data in models_data {
-				let model_id: String = model_data.x_take("id")?;
-
-				// 解析模型的基本信息
-				let model = Self::parse_openai_model_to_model(model_id, model_data)?;
-				models.push(model);
-			}
-		}
-
-		Ok(models)
 	}
 
 	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
@@ -333,7 +193,6 @@ impl OpenAIAdapter {
 		let suffix = match service_type {
 			ServiceType::Chat | ServiceType::ChatStream => "chat/completions",
 			ServiceType::Embed => "embeddings",
-			ServiceType::Models => "models",
 		};
 		let mut full_url = base_url.join(suffix).map_err(|err| {
 			Error::Internal(format!(

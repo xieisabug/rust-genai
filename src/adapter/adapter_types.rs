@@ -1,9 +1,11 @@
+use crate::Headers;
+use crate::Model;
+use crate::ModelIden;
 use crate::adapter::AdapterKind;
 use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse};
 use crate::embed::{EmbedOptionsSet, EmbedRequest, EmbedResponse};
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
-use crate::{Headers, ModelIden};
 use crate::{Result, ServiceTarget};
 use reqwest::RequestBuilder;
 use serde_json::Value;
@@ -18,6 +20,7 @@ pub trait Adapter {
 
 	// NOTE: Adapter is a crate trait, so it is acceptable to use async fn here.
 	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>>;
+	async fn all_models(kind: AdapterKind, target: ServiceTarget) -> Result<Vec<Model>>;
 
 	/// The base service URL for this AdapterKind for the given service type.
 	/// NOTE: For some services, the URL will be further updated in the to_web_request_data method.
@@ -67,6 +70,7 @@ pub enum ServiceType {
 	Chat,
 	ChatStream,
 	Embed,
+	Models,
 }
 
 // endregion: --- ServiceType

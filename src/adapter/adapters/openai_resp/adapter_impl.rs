@@ -9,7 +9,8 @@ use crate::chat::{
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
 use crate::{Error, Headers, Result};
-use crate::{ModelIden, ServiceTarget};
+use crate::{Model, ModelIden, ServiceTarget};
+use crate::adapter::ModelCapabilities;
 use reqwest::RequestBuilder;
 use reqwest_eventsource::EventSource;
 use serde_json::{Map, Value, json};
@@ -40,6 +41,35 @@ impl Adapter for OpenAIRespAdapter {
 	/// Note: Currently returns the common models (see above)
 	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
+	}
+
+	async fn all_models(kind: AdapterKind, _target: ServiceTarget) -> Result<Vec<Model>> {
+		let names = Self::all_model_names(kind).await?;
+		let mut models: Vec<Model> = Vec::new();
+		for id in names {
+			let model_name: crate::ModelName = id.clone().into();
+			let mut model = Model::new(model_name, id.clone());
+			let (max_input_tokens, max_output_tokens) = ModelCapabilities::infer_token_limits(kind, &id);
+			let supports_reasoning = ModelCapabilities::supports_reasoning(kind, &id);
+			model = model
+				.with_max_input_tokens(max_input_tokens)
+				.with_max_output_tokens(max_output_tokens)
+				.with_streaming(ModelCapabilities::supports_streaming(kind, &id))
+				.with_tool_calls(ModelCapabilities::supports_tool_calls(kind, &id))
+				.with_json_mode(ModelCapabilities::supports_json_mode(kind, &id))
+				.with_reasoning(supports_reasoning);
+			let input_modalities = ModelCapabilities::infer_input_modalities(kind, &id);
+			let output_modalities = ModelCapabilities::infer_output_modalities(kind, &id);
+			model = model
+				.with_input_modalities(input_modalities)
+				.with_output_modalities(output_modalities);
+			if supports_reasoning {
+				let reasoning_efforts = ModelCapabilities::infer_reasoning_efforts(kind, &id);
+				model = model.with_reasoning_efforts(reasoning_efforts);
+			}
+			models.push(model);
+		}
+		Ok(models)
 	}
 
 	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
@@ -293,7 +323,8 @@ impl OpenAIRespAdapter {
 
 		let suffix = match service_type {
 			ServiceType::Chat | ServiceType::ChatStream => "responses",
-			ServiceType::Embed => "embeddings", // TODO: Probably needs to say not supported
+			ServiceType::Embed => "embeddings", // Not really supported; kept for completeness
+			ServiceType::Models => "models",
 		};
 		let mut full_url = base_url.join(suffix).map_err(|err| {
 			Error::Internal(format!(

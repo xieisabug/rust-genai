@@ -27,6 +27,11 @@ async fn test_chat_multi_system_ok() -> TestResult<()> {
 }
 
 #[tokio::test]
+async fn test_chat_json_mode_ok() -> TestResult<()> {
+	common_tests::common_test_chat_json_mode_ok(MODEL, Some(Check::USAGE)).await
+}
+
+#[tokio::test]
 async fn test_chat_json_structured_ok() -> TestResult<()> {
 	common_tests::common_test_chat_json_structured_ok(MODEL, Some(Check::USAGE)).await
 }
@@ -75,7 +80,10 @@ async fn test_chat_stream_capture_all_ok() -> TestResult<()> {
 
 // region:    --- Binary Tests
 
-// NOTE: Gemini does not seem to support URL
+const VISION_MODEL: &str = "gemini-2.5-flash"; // Gemini 2.5 models have enhanced vision capabilities
+const VISION_PRO_MODEL: &str = "gemini-2.5-pro"; // Most advanced vision model
+
+// NOTE: Gemini does not seem to support URL-based images in the same way as other providers
 // #[tokio::test]
 // async fn test_chat_binary_image_url_ok() -> TestResult<()> {
 // 	common_tests::common_test_chat_image_url_ok(MODEL).await
@@ -83,17 +91,17 @@ async fn test_chat_stream_capture_all_ok() -> TestResult<()> {
 
 #[tokio::test]
 async fn test_chat_binary_image_b64_ok() -> TestResult<()> {
-	common_tests::common_test_chat_image_b64_ok(MODEL).await
+	common_tests::common_test_chat_image_b64_ok(VISION_MODEL).await
 }
 
 #[tokio::test]
 async fn test_chat_binary_pdf_b64_ok() -> TestResult<()> {
-	common_tests::common_test_chat_pdf_b64_ok(MODEL).await
+	common_tests::common_test_chat_pdf_b64_ok(VISION_PRO_MODEL).await
 }
 
 #[tokio::test]
 async fn test_chat_binary_multi_b64_ok() -> TestResult<()> {
-	common_tests::common_test_chat_multi_binary_b64_ok(MODEL).await
+	common_tests::common_test_chat_multi_binary_b64_ok(VISION_PRO_MODEL).await
 }
 
 // endregion: --- Binary Tests
@@ -125,6 +133,11 @@ async fn test_resolver_auth_ok() -> TestResult<()> {
 #[tokio::test]
 async fn test_list_models() -> TestResult<()> {
 	common_tests::common_test_list_models(AdapterKind::Gemini, "gemini-2.5-pro").await
+}
+
+#[tokio::test]
+async fn test_all_models() -> TestResult<()> {
+	common_tests::common_test_all_models(AdapterKind::Gemini, "gemini-2.5-flash").await
 }
 
 // endregion: --- List

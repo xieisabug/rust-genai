@@ -4,7 +4,7 @@ use crate::support::{Check, TestResult, common_tests};
 use genai::adapter::AdapterKind;
 use genai::resolver::AuthData;
 
-const MODEL: &str = "glm-4-plus";
+const MODEL: &str = "glm-4-plus"; // Base GLM model for testing
 const MODEL_NS: &str = "zai::glm-4-plus";
 const MODEL_V: &str = "glm-4v-flash"; // Visual language model does not support function calling
 
@@ -116,6 +116,11 @@ async fn test_resolver_auth_ok() -> TestResult<()> {
 #[tokio::test]
 async fn test_list_models() -> TestResult<()> {
 	common_tests::common_test_list_models(AdapterKind::Zai, "glm-4-plus").await
+}
+
+#[tokio::test]
+async fn test_all_models() -> TestResult<()> {
+	common_tests::common_test_all_models(AdapterKind::Zai, "glm-4-plus").await
 }
 
 // endregion: --- List

@@ -4,7 +4,7 @@ use crate::support::{Check, TestResult, common_tests};
 use genai::adapter::AdapterKind;
 use genai::resolver::AuthData;
 
-// deepseek-reasoner (note: Does not support json output and streaming - or different streaming -)
+// deepseek-reasoner (DeepSeek-R1-0528 - supports JSON output, function calling, and streaming)
 const MODEL: &str = "deepseek-reasoner";
 
 // region:    --- Chat
@@ -19,11 +19,16 @@ async fn test_chat_multi_system_ok() -> TestResult<()> {
 	common_tests::common_test_chat_multi_system_ok(MODEL).await
 }
 
-/// NOTE: deepseek-reasonner does not support Json Output (2025-01-21)
-// #[tokio::test]
-// async fn test_chat_json_mode_ok() -> TestResult<()> {
-// 	common_tests::common_test_chat_json_mode_ok(MODEL, true).await
-// }
+// DeepSeek-R1-0528 now supports JSON output and function calling
+#[tokio::test]
+async fn test_chat_json_mode_ok() -> TestResult<()> {
+	common_tests::common_test_chat_json_mode_ok(MODEL, Some(Check::REASONING | Check::USAGE)).await
+}
+
+#[tokio::test]
+async fn test_chat_json_structured_ok() -> TestResult<()> {
+	common_tests::common_test_chat_json_structured_ok(MODEL, Some(Check::REASONING | Check::USAGE)).await
+}
 
 #[tokio::test]
 async fn test_chat_temperature_ok() -> TestResult<()> {
@@ -39,12 +44,26 @@ async fn test_chat_stop_sequences_ok() -> TestResult<()> {
 async fn test_chat_reasoning_normalize_ok() -> TestResult<()> {
 	common_tests::common_test_chat_reasoning_normalize_ok(MODEL).await
 }
+
 // endregion: --- Chat
+
+// region:    --- Tool Tests
+
+#[tokio::test]
+async fn test_tool_simple_ok() -> TestResult<()> {
+	common_tests::common_test_tool_simple_ok(MODEL).await
+}
+
+#[tokio::test]
+async fn test_tool_full_flow_ok() -> TestResult<()> {
+	common_tests::common_test_tool_full_flow_ok(MODEL).await
+}
+
+// endregion: --- Tool Tests
 
 // region:    --- Chat Stream Tests
 
-// NOTE: genai does not support deepseek-reasonner stream yet.
-
+// DeepSeek-R1-0528 supports streaming with reasoning content
 #[tokio::test]
 async fn test_chat_stream_simple_ok() -> TestResult<()> {
 	common_tests::common_test_chat_stream_simple_ok(MODEL, Some(Check::REASONING_CONTENT)).await

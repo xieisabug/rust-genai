@@ -8,19 +8,27 @@ use crate::chat::{
 };
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::{WebResponse, WebStream};
-use crate::{Error, Headers, ModelIden, Result, ServiceTarget};
+use crate::{Error, Headers, Model, ModelIden, Result, ServiceTarget};
 use reqwest::RequestBuilder;
 use serde_json::{Value, json};
 use value_ext::JsonValueExt;
+use crate::adapter::ModelCapabilities;
 
 pub struct GeminiAdapter;
 
-// Note: Those model names are just informative, as the Gemini AdapterKind is selected on `startsWith("gemini")`
-const MODELS: &[&str] = &[
-	//
+// Gemini models (informative list)
+pub(in crate::adapter) const MODELS: &[&str] = &[
 	"gemini-2.5-pro",
 	"gemini-2.5-flash",
 	"gemini-2.5-flash-lite",
+	"gemini-2.0-flash",
+	"gemini-2.0-flash-lite",
+	"gemini-2.0-flash-live",
+	"gemini-1.5-pro",
+	"gemini-1.5-flash",
+	"gemini-1.0-pro",
+	"gemini-embedding-001",
+	"text-embedding-004",
 ];
 
 // Per gemini doc (https://x.com/jeremychone/status/1916501987371438372)
@@ -53,6 +61,86 @@ impl Adapter for GeminiAdapter {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 
+	async fn all_models(kind: AdapterKind, target: ServiceTarget) -> Result<Vec<Model>> {
+		// 使用 API 获取模型列表，如果失败则回退到硬编码列表
+		let auth = target.auth;
+		let endpoint = target.endpoint;
+
+		// 构建一个临时的 ModelIden 用于获取服务 URL
+		let model_iden = ModelIden::new(kind, "temp");
+
+		// 获取 models API 的 URL 
+		let url = Self::get_service_url(&model_iden, ServiceType::Models, endpoint)?;
+
+		// 获取 API key
+		let api_key = get_api_key(auth, &model_iden)?;
+
+		// 构建请求头 - Gemini 使用 x-goog-api-key 头部
+		let headers = vec![(String::from("x-goog-api-key"), api_key)];
+
+		// 创建 WebClient 并发送请求
+		let web_client = crate::webc::WebClient::default();
+		let web_response = web_client
+			.do_get(&url, &headers)
+			.await
+			.map_err(|webc_error| Error::WebAdapterCall {
+				adapter_kind: kind,
+				webc_error,
+			});
+
+		// 解析响应并创建模型列表
+		let mut models: Vec<Model> = Vec::new();
+
+		// 如果API调用失败，回退到硬编码的模型列表
+		let model_ids: Vec<String> = if let Ok(response) = web_response {
+			if let Ok(api_models) = Self::parse_models_response(response) {
+				api_models
+			} else {
+				// API 响应解析失败，回退到硬编码模型列表
+				MODELS.iter().map(|s| s.to_string()).collect()
+			}
+		} else {
+			// API 调用失败，回退到硬编码模型列表
+			MODELS.iter().map(|s| s.to_string()).collect()
+		};
+
+		// 为每个模型创建 Model 对象
+		for model_id in model_ids {
+			let model_name: crate::ModelName = model_id.clone().into();
+			let mut model = Model::new(model_name, model_id.clone());
+			
+			// 设置 Gemini 模型的特性
+			let (max_input_tokens, max_output_tokens) = ModelCapabilities::infer_token_limits(AdapterKind::Gemini, &model_id);
+			let supports_reasoning = ModelCapabilities::supports_reasoning(AdapterKind::Gemini, &model_id);
+			
+			model = model
+				.with_max_input_tokens(max_input_tokens)
+				.with_max_output_tokens(max_output_tokens)
+				.with_streaming(ModelCapabilities::supports_streaming(AdapterKind::Gemini, &model_id))
+				.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Gemini, &model_id))
+				.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Gemini, &model_id))
+				.with_reasoning(supports_reasoning);
+			
+			// 设置输入输出模态
+			let input_modalities = ModelCapabilities::infer_input_modalities(AdapterKind::Gemini, &model_id);
+			let output_modalities = ModelCapabilities::infer_output_modalities(AdapterKind::Gemini, &model_id);
+			
+			model = model
+				.with_input_modalities(input_modalities)
+				.with_output_modalities(output_modalities);
+			
+			// 如果支持推理，设置推理努力等级
+			if supports_reasoning {
+				let reasoning_efforts = ModelCapabilities::infer_reasoning_efforts(AdapterKind::Gemini, &model_id);
+				model = model.with_reasoning_efforts(reasoning_efforts);
+			}
+			
+			models.push(model);
+		}
+		
+		Ok(models)
+	}
+
 	/// NOTE: As Google Gemini has decided to put their API_KEY in the URL,
 	///       this will return the URL without the API_KEY in it. The API_KEY will need to be added by the caller.
 	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
@@ -62,6 +150,7 @@ impl Adapter for GeminiAdapter {
 			ServiceType::Chat => format!("{base_url}models/{model_name}:generateContent"),
 			ServiceType::ChatStream => format!("{base_url}models/{model_name}:streamGenerateContent"),
 			ServiceType::Embed => format!("{base_url}models/{model_name}:embedContent"), // Gemini embeddings API
+			ServiceType::Models => format!("{base_url}models"),
 		};
 		Ok(url)
 	}
@@ -566,6 +655,35 @@ impl GeminiAdapter {
 			contents,
 			tools,
 		})
+	}
+
+	/// Parse Gemini models API response to extract model IDs
+	/// Gemini API format: {"models": [{"name": "models/gemini-pro", "displayName": "Gemini Pro", ...}, ...]}
+	fn parse_models_response(mut web_response: crate::webc::WebResponse) -> Result<Vec<String>> {
+		let models_array: Vec<Value> = web_response.body.x_take("models")?;
+		
+		let mut model_ids = Vec::new();
+		for mut model_data in models_array {
+			if let Ok(full_name) = model_data.x_take::<String>("name") {
+				// Gemini API returns full names like "models/gemini-2.5-pro"
+				// Extract just the model ID part after "models/"
+				if let Some(model_id) = full_name.strip_prefix("models/") {
+					// Filter to only include supported generative models
+					if model_id.starts_with("gemini-") || model_id.starts_with("text-embedding-") {
+						model_ids.push(model_id.to_string());
+					}
+				}
+			}
+		}
+		
+		// If no valid models found in API response, return error to trigger fallback
+		if model_ids.is_empty() {
+			return Err(Error::InvalidJsonResponseElement {
+				info: "No valid Gemini models found in API response",
+			});
+		}
+		
+		Ok(model_ids)
 	}
 }
 

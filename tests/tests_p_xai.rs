@@ -24,17 +24,17 @@ async fn test_chat_multi_system_ok() -> TestResult<()> {
 	common_tests::common_test_chat_multi_system_ok(MODEL).await
 }
 
-/// NOTE - Disable for now, not supported by xAI as of 2024-12-08
-// #[tokio::test]
-// async fn test_chat_json_mode_ok() -> TestResult<()> {
-// 	common_tests::common_test_chat_json_mode_ok(MODEL, true).await
-// }
-//
-/// NOTE - Disable for now, not supported by xAI as of 2024-12-08
-// #[tokio::test]
-// async fn test_chat_json_structured_ok() -> TestResult<()> {
-// 	common_tests::common_test_chat_json_structured_ok(MODEL, true).await
-// }
+#[tokio::test]
+#[serial(xai)]
+async fn test_chat_json_mode_ok() -> TestResult<()> {
+	common_tests::common_test_chat_json_mode_ok(MODEL, Some(crate::support::Check::USAGE)).await
+}
+
+#[tokio::test]
+#[serial(xai)]
+async fn test_chat_json_structured_ok() -> TestResult<()> {
+	common_tests::common_test_chat_json_structured_ok(MODEL, Some(crate::support::Check::USAGE)).await
+}
 
 #[tokio::test]
 #[serial(xai)]
@@ -73,33 +73,33 @@ async fn test_chat_stream_capture_all_ok() -> TestResult<()> {
 
 // endregion: --- Chat Stream Tests
 
-// region:    --- Binary Tests
-
-// #[tokio::test]
-// #[serial(xai)]
-// async fn test_chat_binary_image_url_ok() -> TestResult<()> {
-// 	common_tests::common_test_chat_image_url_ok(MODEL).await
-// }
+// region:    --- Tool Tests
 
 #[tokio::test]
 #[serial(xai)]
-async fn test_chat_binary_image_b64_ok() -> TestResult<()> {
-	common_tests::common_test_chat_image_b64_ok(MODEL_IMAGE).await
+async fn test_tool_simple_ok() -> TestResult<()> {
+	common_tests::common_test_tool_simple_ok(MODEL).await
 }
 
-// #[tokio::test]
-// #[serial(xai)]
-// async fn test_chat_binary_pdf_b64_ok() -> TestResult<()> {
-// 	common_tests::common_test_chat_pdf_b64_ok(MODEL).await
-// }
+#[tokio::test]
+#[serial(xai)]
+async fn test_tool_full_flow_ok() -> TestResult<()> {
+	common_tests::common_test_tool_full_flow_ok(MODEL).await
+}
 
-// #[tokio::test]
-// #[serial(xai)]
-// async fn test_chat_binary_multi_b64_ok() -> TestResult<()> {
-// 	common_tests::common_test_chat_multi_binary_b64_ok(MODEL).await
-// }
+// endregion: --- Tool Tests
 
-// endregion: --- Binary Tests
+// region:    --- Vision Tests
+
+const VISION_MODEL: &str = "grok-2-vision-1212"; // xAI's vision model
+
+#[tokio::test]
+#[serial(xai)]
+async fn test_chat_image_b64_ok() -> TestResult<()> {
+	common_tests::common_test_chat_image_b64_ok(VISION_MODEL).await
+}
+
+// endregion: --- Vision Tests
 
 // region:    --- Resolver Tests
 
@@ -117,6 +117,12 @@ async fn test_resolver_auth_ok() -> TestResult<()> {
 #[serial(xai)]
 async fn test_list_models() -> TestResult<()> {
 	common_tests::common_test_list_models(AdapterKind::Xai, "grok-3").await
+}
+
+#[tokio::test]
+#[serial(xai)]
+async fn test_all_models() -> TestResult<()> {
+	common_tests::common_test_all_models(AdapterKind::Xai, "grok-4-0709").await
 }
 
 // endregion: --- List

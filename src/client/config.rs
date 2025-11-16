@@ -1,4 +1,4 @@
-use crate::adapter::AdapterDispatcher;
+use crate::adapter::{AdapterDispatcher, AdapterKind};
 use crate::chat::ChatOptions;
 use crate::client::ServiceTarget;
 use crate::embed::EmbedOptions;
@@ -145,6 +145,29 @@ impl ClientConfig {
 					.await
 					.map_err(|resolver_error| Error::Resolver {
 						model_iden: model,
+						resolver_error,
+					})?
+			}
+			None => service_target,
+		};
+
+		Ok(service_target)
+	}
+
+	pub async fn resolve_service_target_without_model(&self, adapter_kind: AdapterKind) -> Result<ServiceTarget> {
+		let service_target = ServiceTarget {
+			model: ModelIden::new(adapter_kind, ""),
+			auth: AdapterDispatcher::default_auth(adapter_kind),
+			endpoint: AdapterDispatcher::default_endpoint(adapter_kind),
+		};
+
+		let service_target = match self.service_target_resolver() {
+			Some(service_target_resolver) => {
+				service_target_resolver
+					.resolve(service_target)
+					.await
+					.map_err(|resolver_error| Error::Resolver {
+						model_iden: ModelIden::new(adapter_kind, ""),
 						resolver_error,
 					})?
 			}
