@@ -2,7 +2,7 @@ use crate::adapter::adapters::support::get_api_key;
 use crate::adapter::gemini::GeminiStreamer;
 use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{
-	BinarySource, ChatOptionsSet, ChatRequest, ChatResponse, ChatResponseFormat, ChatRole, ChatStream,
+	Binary, BinarySource, ChatOptionsSet, ChatRequest, ChatResponse, ChatResponseFormat, ChatRole, ChatStream,
 	ChatStreamResponse, CompletionTokensDetails, ContentPart, MessageContent, PromptTokensDetails, ReasoningEffort,
 	ToolCall, Usage,
 };
@@ -16,21 +16,17 @@ use crate::adapter::ModelCapabilities;
 
 pub struct GeminiAdapter;
 
-// Updated model list for 2025 - includes latest Gemini 2.5 and 2.0 series
+// Gemini models (informative list)
 pub(in crate::adapter) const MODELS: &[&str] = &[
-	// Gemini 2.5 series - Most advanced with thinking capabilities
 	"gemini-2.5-pro",
-	"gemini-2.5-flash", 
+	"gemini-2.5-flash",
 	"gemini-2.5-flash-lite",
-	// Gemini 2.0 series - Next generation with native tool use
 	"gemini-2.0-flash",
 	"gemini-2.0-flash-lite",
 	"gemini-2.0-flash-live",
-	// Legacy models still supported
 	"gemini-1.5-pro",
 	"gemini-1.5-flash",
 	"gemini-1.0-pro",
-	// Embedding models
 	"gemini-embedding-001",
 	"text-embedding-004",
 ];
@@ -74,7 +70,7 @@ impl Adapter for GeminiAdapter {
 		let model_iden = ModelIden::new(kind, "temp");
 
 		// 获取 models API 的 URL 
-		let url = Self::get_service_url(&model_iden, ServiceType::Models, endpoint);
+		let url = Self::get_service_url(&model_iden, ServiceType::Models, endpoint)?;
 
 		// 获取 API key
 		let api_key = get_api_key(auth, &model_iden)?;
@@ -147,15 +143,16 @@ impl Adapter for GeminiAdapter {
 
 	/// NOTE: As Google Gemini has decided to put their API_KEY in the URL,
 	///       this will return the URL without the API_KEY in it. The API_KEY will need to be added by the caller.
-	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> String {
+	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
 		let base_url = endpoint.base_url();
 		let (model_name, _) = model.model_name.as_model_name_and_namespace();
-		match service_type {
+		let url = match service_type {
 			ServiceType::Chat => format!("{base_url}models/{model_name}:generateContent"),
 			ServiceType::ChatStream => format!("{base_url}models/{model_name}:streamGenerateContent"),
 			ServiceType::Embed => format!("{base_url}models/{model_name}:embedContent"), // Gemini embeddings API
 			ServiceType::Models => format!("{base_url}models"),
-		}
+		};
+		Ok(url)
 	}
 
 	fn to_web_request_data(
@@ -174,16 +171,16 @@ impl Adapter for GeminiAdapter {
 		let headers = Headers::from(("x-goog-api-key".to_string(), api_key.to_string()));
 
 		// -- Reasoning Budget
-		let (provider_model_name, reasoning_effort) = match (model_name, options_set.reasoning_effort()) {
+		let (provider_model_name, reasoning_budget) = match (model_name, options_set.reasoning_effort()) {
 			// No explicity reasoning_effor, try to infer from model name suffix (supports -zero)
 			(model, None) => {
 				// let model_name: &str = &model.model_name;
 				if let Some((prefix, last)) = model_name.rsplit_once('-') {
 					let reasoning = match last {
-						"zero" => Some(ReasoningEffort::Budget(REASONING_ZERO)),
-						"low" => Some(ReasoningEffort::Budget(REASONING_LOW)),
-						"medium" => Some(ReasoningEffort::Budget(REASONING_MEDIUM)),
-						"high" => Some(ReasoningEffort::Budget(REASONING_HIGH)),
+						"zero" => Some(REASONING_ZERO),
+						"low" => Some(REASONING_LOW),
+						"medium" => Some(REASONING_MEDIUM),
+						"high" => Some(REASONING_HIGH),
 						_ => None,
 					};
 					// create the model name if there was a `-..` reasoning suffix
@@ -198,11 +195,11 @@ impl Adapter for GeminiAdapter {
 			(model, Some(effort)) => {
 				let effort = match effort {
 					// -- for now, match minimal to Low (because zero is not supported by 2.5 pro)
-					ReasoningEffort::Minimal => ReasoningEffort::Budget(REASONING_LOW),
-					ReasoningEffort::Low => ReasoningEffort::Budget(REASONING_LOW),
-					ReasoningEffort::Medium => ReasoningEffort::Budget(REASONING_MEDIUM),
-					ReasoningEffort::High => ReasoningEffort::Budget(REASONING_HIGH),
-					ReasoningEffort::Budget(budget) => ReasoningEffort::Budget(*budget),
+					ReasoningEffort::Minimal => REASONING_LOW,
+					ReasoningEffort::Low => REASONING_LOW,
+					ReasoningEffort::Medium => REASONING_MEDIUM,
+					ReasoningEffort::High => REASONING_HIGH,
+					ReasoningEffort::Budget(budget) => *budget,
 				};
 				(model, Some(effort))
 			}
@@ -221,7 +218,7 @@ impl Adapter for GeminiAdapter {
 		});
 
 		// -- Set the reasoning effort
-		if let Some(ReasoningEffort::Budget(budget)) = reasoning_effort {
+		if let Some(budget) = reasoning_budget {
 			payload.x_insert("/generationConfig/thinkingConfig/thinkingBudget", budget)?;
 		}
 
@@ -276,8 +273,7 @@ impl Adapter for GeminiAdapter {
 
 		// -- url
 		let provider_model = model.from_name(provider_model_name);
-		let url = Self::get_service_url(&provider_model, service_type, endpoint);
-		let url = url.to_string();
+		let url = Self::get_service_url(&provider_model, service_type, endpoint)?;
 
 		Ok(WebRequestData { url, headers, payload })
 	}
@@ -302,17 +298,12 @@ impl Adapter for GeminiAdapter {
 		} = gemini_response;
 
 		// FIXME: Needs to take the content list
-		let mut tool_calls: Vec<ToolCall> = Default::default();
-		let mut content: Vec<MessageContent> = Default::default();
-		// let mut text_content:
+		let mut content: MessageContent = MessageContent::default();
 		for g_item in gemini_content {
 			match g_item {
-				GeminiChatContent::Text(text) => content.push(MessageContent::from_text(text)),
-				GeminiChatContent::ToolCall(tool_call) => tool_calls.push(tool_call),
+				GeminiChatContent::Text(text) => content.push(text),
+				GeminiChatContent::ToolCall(tool_call) => content.push(tool_call),
 			}
-		}
-		if !tool_calls.is_empty() {
-			content.push(MessageContent::ToolCalls(tool_calls))
 		}
 
 		Ok(ChatResponse {
@@ -365,7 +356,7 @@ impl GeminiAdapter {
 	pub(super) fn body_to_gemini_chat_response(model_iden: &ModelIden, mut body: Value) -> Result<GeminiChatResponse> {
 		// If the body has an `error` property, then it is assumed to be an error.
 		if body.get("error").is_some() {
-			return Err(Error::StreamEventError {
+			return Err(Error::ChatResponse {
 				model_iden: model_iden.clone(),
 				body,
 			});
@@ -374,7 +365,22 @@ impl GeminiAdapter {
 		let mut content: Vec<GeminiChatContent> = Vec::new();
 
 		// -- Read multipart
-		let parts = body.x_take::<Vec<Value>>("/candidates/0/content/parts")?;
+		let parts = match body.x_take::<Vec<Value>>("/candidates/0/content/parts") {
+			Ok(parts) => parts,
+			Err(_) => {
+				let finish_reason = body.x_remove::<String>("/candidates/finishReason").ok();
+				let usage_metadata = body.x_remove::<Value>("/usageMetadata").ok();
+				let body = json!({
+					"finishReason": finish_reason,
+					"usageMetadata": usage_metadata,
+				});
+				return Err(Error::ChatResponse {
+					model_iden: model_iden.clone(),
+					body,
+				});
+			}
+		};
+
 		for mut part in parts {
 			// -- Capture eventual function call
 			if let Ok(fn_call_value) = part.x_take::<Value>("functionCall") {
@@ -494,155 +500,113 @@ impl GeminiAdapter {
 			match msg.role {
 				// For now, system goes as "user" (later, we might have adapter_config.system_to_user_impl)
 				ChatRole::System => {
-					let MessageContent::Text(content) = msg.content else {
-						return Err(Error::MessageContentTypeNotSupported {
-							model_iden: model_iden.clone(),
-							cause: "Only MessageContent::Text supported for this model (for now)",
-						});
-					};
-					systems.push(content)
+					if let Some(content) = msg.content.into_joined_texts() {
+						systems.push(content);
+					}
 				}
 				ChatRole::User => {
-					let content = match msg.content {
-						MessageContent::Text(content) => json!([{"text": content}]),
-						MessageContent::Parts(parts) => {
-							json!(
-								parts
-									.iter()
-									.map(|part| match part {
-										ContentPart::Text(text) => json!({"text": text.clone()}),
-										ContentPart::Binary {
-											name: _name,
-											content_type,
-											source,
-										} => {
-											match source {
-												BinarySource::Url(url) => json!({
-													"file_data": {
-														"mime_type": content_type,
-														"file_uri": url
-													}
-												}),
-												BinarySource::Base64(content) => json!({
-													"inline_data": {
-														"mime_type": content_type,
-														"data": content
-													}
-												}),
-											}
+					let mut parts_values: Vec<Value> = Vec::new();
+					for part in msg.content {
+						match part {
+							ContentPart::Text(text) => parts_values.push(json!({"text": text})),
+							ContentPart::Binary(binary) => {
+								let Binary {
+									content_type, source, ..
+								} = binary;
+								match &source {
+									BinarySource::Url(url) => parts_values.push(json!({
+										"file_data": {
+											"mime_type": content_type,
+											"file_uri": url
 										}
-									})
-									.collect::<Vec<Value>>()
-							)
+									})),
+									BinarySource::Base64(content) => parts_values.push(json!({
+										"inline_data": {
+											"mime_type": content_type,
+											"data": content
+										}
+									})),
+								}
+							}
+							ContentPart::ToolCall(tool_call) => {
+								parts_values.push(json!({
+									"functionCall": {
+										"name": tool_call.fn_name,
+										"args": tool_call.fn_arguments,
+									}
+								}));
+							}
+							ContentPart::ToolResponse(tool_response) => {
+								parts_values.push(json!({
+									"functionResponse": {
+										"name": tool_response.call_id,
+										"response": {
+											"name": tool_response.call_id,
+											"content": tool_response.content,
+										}
+									}
+								}));
+							}
 						}
-						MessageContent::ToolCalls(tool_calls) => {
-							json!(
-								tool_calls
-									.into_iter()
-									.map(|tool_call| {
-										json!({
-											"functionCall": {
-												"name": tool_call.fn_name,
-												"args": tool_call.fn_arguments,
-											}
-										})
-									})
-									.collect::<Vec<Value>>()
-							)
-						}
-						MessageContent::ToolResponses(tool_responses) => {
-							json!(
-								tool_responses
-									.into_iter()
-									.map(|tool_response| {
-										json!({
-											"functionResponse": {
-												"name": tool_response.call_id,
-												"response": {
-													"name": tool_response.call_id,
-													"content": tool_response.content,
-												}
-											}
-										})
-									})
-									.collect::<Vec<Value>>()
-							)
-						}
-					};
+					}
 
-					contents.push(json!({"role": "user", "parts": content}));
+					contents.push(json!({"role": "user", "parts": parts_values}));
 				}
 				ChatRole::Assistant => {
-					match msg.content {
-						MessageContent::Text(content) => {
-							contents.push(json!({"role": "model", "parts": [{"text": content}]}))
+					let mut parts_values: Vec<Value> = Vec::new();
+					for part in msg.content {
+						match part {
+							ContentPart::Text(text) => parts_values.push(json!({"text": text})),
+							ContentPart::ToolCall(tool_call) => {
+								parts_values.push(json!({
+									"functionCall": {
+										"name": tool_call.fn_name,
+										"args": tool_call.fn_arguments,
+									}
+								}));
+							}
+							// Ignore unsupported parts for Assistant role
+							ContentPart::Binary(_) => {}
+							ContentPart::ToolResponse(_) => {}
 						}
-						MessageContent::ToolCalls(tool_calls) => contents.push(json!({
-							"role": "model",
-							"parts": tool_calls
-								.into_iter()
-								.map(|tool_call| {
-									json!({
-										"functionCall": {
-											"name": tool_call.fn_name,
-											"args": tool_call.fn_arguments,
-										}
-									})
-								})
-								.collect::<Vec<Value>>()
-						})),
-						_ => {
-							return Err(Error::MessageContentTypeNotSupported {
-								model_iden: model_iden.clone(),
-								cause: "Only MessageContent::Text and MessageContent::ToolCalls supported for this model (for now)",
-							});
-						}
-					};
+					}
+					if !parts_values.is_empty() {
+						contents.push(json!({"role": "model", "parts": parts_values}));
+					}
 				}
 				ChatRole::Tool => {
-					let content = match msg.content {
-						MessageContent::ToolCalls(tool_calls) => {
-							json!(
-								tool_calls
-									.into_iter()
-									.map(|tool_call| {
-										json!({
-											"functionCall": {
-												"name": tool_call.fn_name,
-												"args": tool_call.fn_arguments,
-											}
-										})
-									})
-									.collect::<Vec<Value>>()
-							)
+					let mut parts_values: Vec<Value> = Vec::new();
+					for part in msg.content {
+						match part {
+							ContentPart::ToolCall(tool_call) => {
+								parts_values.push(json!({
+									"functionCall": {
+										"name": tool_call.fn_name,
+										"args": tool_call.fn_arguments,
+									}
+								}));
+							}
+							ContentPart::ToolResponse(tool_response) => {
+								parts_values.push(json!({
+									"functionResponse": {
+										"name": tool_response.call_id,
+										"response": {
+											"name": tool_response.call_id,
+											"content": tool_response.content,
+										}
+									}
+								}));
+							}
+							_ => {
+								return Err(Error::MessageContentTypeNotSupported {
+									model_iden: model_iden.clone(),
+									cause: "ChatRole::Tool can only contain ToolCall or ToolResponse content parts",
+								});
+							}
 						}
-						MessageContent::ToolResponses(tool_responses) => {
-							json!(
-								tool_responses
-									.into_iter()
-									.map(|tool_response| {
-										json!({
-											"functionResponse": {
-												"name": tool_response.call_id,
-												"response": {
-													"name": tool_response.call_id,
-													"content": tool_response.content,
-												}
-											}
-										})
-									})
-									.collect::<Vec<Value>>()
-							)
-						}
-						_ => {
-							return Err(Error::MessageContentTypeNotSupported {
-								model_iden: model_iden.clone(),
-								cause: "ChatRole::Tool can only be MessageContent::ToolCall or MessageContent::ToolResponse",
-							});
-						}
-					};
+					}
 
-					contents.push(json!({"role": "user", "parts": content}));
+					contents.push(json!({"role": "user", "parts": parts_values}));
 				}
 			}
 		}

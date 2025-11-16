@@ -44,7 +44,7 @@ impl Adapter for DeepSeekAdapter {
 		let model_iden = ModelIden::new(kind, "temp");
 
 		// 获取 models API 的 URL（DeepSeek 使用 OpenAI 兼容的端点）
-		let url = OpenAIAdapter::util_get_service_url(&model_iden, ServiceType::Models, endpoint);
+		let url = OpenAIAdapter::util_get_service_url(&model_iden, ServiceType::Models, endpoint)?;
 
 		// 获取 API key
 		let api_key = get_api_key(auth, &model_iden)?;
@@ -110,7 +110,7 @@ impl Adapter for DeepSeekAdapter {
 		Ok(models)
 	}
 
-	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> String {
+	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
 		OpenAIAdapter::util_get_service_url(model, service_type, endpoint)
 	}
 

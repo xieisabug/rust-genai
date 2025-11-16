@@ -3,6 +3,7 @@ use crate::adapter::model_capabilities::ModelCapabilities;
 use crate::adapter::openai::OpenAIStreamer;
 use crate::adapter::openai::ToWebRequestCustom;
 use crate::adapter::{Adapter, AdapterDispatcher, AdapterKind, ServiceType, WebRequestData};
+use crate::chat::Binary;
 use crate::chat::{
 	BinarySource, ChatOptionsSet, ChatRequest, ChatResponse, ChatResponseFormat, ChatRole, ChatStream,
 	ChatStreamResponse, ContentPart, MessageContent, ReasoningEffort, ToolCall, Usage,
@@ -26,9 +27,14 @@ pub struct OpenAIAdapter;
 // Latest models
 const MODELS: &[&str] = &[
 	//
+	"gpt-5.1",
+	"gpt-5.1-codex",
+	"gpt-5.1-codex-mini",
 	"gpt-5",
 	"gpt-5-mini",
 	"gpt-5-nano",
+	"gpt-audio-mini",
+	"gpt-audio",
 ];
 
 impl OpenAIAdapter {
@@ -153,7 +159,7 @@ impl Adapter for OpenAIAdapter {
 		let model_iden = ModelIden::new(kind, "temp");
 
 		// 获取 models API 的 URL
-		let url = Self::util_get_service_url(&model_iden, ServiceType::Models, endpoint);
+		let url = Self::util_get_service_url(&model_iden, ServiceType::Models, endpoint)?;
 
 		// 获取 API key
 		let api_key = get_api_key(auth, &model_iden)?;
@@ -187,7 +193,7 @@ impl Adapter for OpenAIAdapter {
 		Ok(models)
 	}
 
-	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> String {
+	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
 		Self::util_get_service_url(model, service_type, endpoint)
 	}
 
@@ -220,7 +226,7 @@ impl Adapter for OpenAIAdapter {
 			.unwrap_or_default();
 
 		// -- Capture the content
-		let mut content: Vec<MessageContent> = Vec::new();
+		let mut content: MessageContent = MessageContent::default();
 		let mut reasoning_content: Option<String> = None;
 
 		if let Ok(Some(mut first_choice)) = body.x_take::<Option<Value>>("/choices/0") {
@@ -252,7 +258,7 @@ impl Adapter for OpenAIAdapter {
 
 				// After extracting reasoning_content, sometimes the content is empty.
 				if !text_content.is_empty() {
-					content.push(text_content.into());
+					content.push(text_content);
 				}
 			}
 
@@ -264,7 +270,7 @@ impl Adapter for OpenAIAdapter {
 				.transpose()?
 				.map(MessageContent::from_tool_calls)
 			{
-				content.push(tool_calls);
+				content.extend(tool_calls);
 			}
 		}
 
@@ -317,10 +323,11 @@ impl OpenAIAdapter {
 		service_type: ServiceType,
 		// -- utility arguments
 		default_endpoint: Endpoint,
-	) -> String {
+	) -> Result<String> {
 		let base_url = default_endpoint.base_url();
 		// Parse into URL and query-params
-		let base_url = reqwest::Url::parse(base_url).unwrap();
+		let base_url = reqwest::Url::parse(base_url)
+			.map_err(|err| Error::Internal(format!("Cannot parse url: {base_url}. Cause:\n{err}")))?;
 		let original_query_params = base_url.query().to_owned();
 
 		let suffix = match service_type {
@@ -328,9 +335,13 @@ impl OpenAIAdapter {
 			ServiceType::Embed => "embeddings",
 			ServiceType::Models => "models",
 		};
-		let mut full_url = base_url.join(suffix).unwrap();
+		let mut full_url = base_url.join(suffix).map_err(|err| {
+			Error::Internal(format!(
+				"Cannot joing suffix '{suffix}' for url: {base_url}. Cause:\n{err}"
+			))
+		})?;
 		full_url.set_query(original_query_params);
-		full_url.to_string()
+		Ok(full_url.to_string())
 	}
 
 	/// Shared OpenAI to_web_request_data for various OpenAI compatible adapters
@@ -349,7 +360,7 @@ impl OpenAIAdapter {
 		let api_key = get_api_key(auth, &model)?;
 
 		// -- url
-		let url = AdapterDispatcher::get_service_url(&model, service_type, endpoint);
+		let url = AdapterDispatcher::get_service_url(&model, service_type, endpoint)?;
 
 		// -- headers
 		let mut headers = Headers::from(("Authorization".to_string(), format!("Bearer {api_key}")));
@@ -386,10 +397,17 @@ impl OpenAIAdapter {
 		});
 
 		// -- Set reasoning effort
-		if let Some(reasoning_effort) = reasoning_effort {
-			if let Some(keyword) = reasoning_effort.as_keyword() {
-				payload.x_insert("reasoning_effort", keyword)?;
-			}
+		if let Some(reasoning_effort) = reasoning_effort
+			&& let Some(keyword) = reasoning_effort.as_keyword()
+		{
+			payload.x_insert("reasoning_effort", keyword)?;
+		}
+
+		// -- Set verbosity
+		if let Some(verbosity) = options_set.verbosity()
+			&& let Some(keyword) = verbosity.as_keyword()
+		{
+			payload.x_insert("verbosity", keyword)?;
 		}
 
 		// -- Tools
@@ -460,6 +478,12 @@ impl OpenAIAdapter {
 		if let Some(seed) = options_set.seed() {
 			payload.x_insert("seed", seed)?;
 		}
+		if let Some(service_tier) = options_set.service_tier()
+			&& let Some(keyword) = service_tier.as_keyword()
+		{
+			payload.x_insert("service_tier", keyword)?;
+		}
+
 		Ok(WebRequestData { url, headers, payload })
 	}
 
@@ -467,7 +491,7 @@ impl OpenAIAdapter {
 	pub(super) fn into_usage(adapter: AdapterKind, usage_value: Value) -> Usage {
 		// NOTE: here we make sure we do not fail since we do not want to break a response because usage parsing fail
 		let usage = serde_json::from_value(usage_value).map_err(|err| {
-			error!("Fail to deserilaize uage. Cause: {err}");
+			error!("Fail to deserialize usage. Cause: {err}");
 			err
 		});
 		let mut usage: Usage = usage.unwrap_or_default();
@@ -480,11 +504,11 @@ impl OpenAIAdapter {
 		// TODO: We might want to do this for other token details as well.
 		// TODO: We could check if the math adds up first with the total token count, and only change it if it does not.
 		//       This will allow us to be forward compatible if/when they fix this bug (yes, it is a bug).
-		if matches!(adapter, AdapterKind::Xai) {
-			if let Some(reasoning_tokens) = usage.completion_tokens_details.as_ref().and_then(|d| d.reasoning_tokens) {
-				let completion_tokens = usage.completion_tokens.unwrap_or(0);
-				usage.completion_tokens = Some(completion_tokens + reasoning_tokens)
-			}
+		if matches!(adapter, AdapterKind::Xai)
+			&& let Some(reasoning_tokens) = usage.completion_tokens_details.as_ref().and_then(|d| d.reasoning_tokens)
+		{
+			let completion_tokens = usage.completion_tokens.unwrap_or(0);
+			usage.completion_tokens = Some(completion_tokens + reasoning_tokens)
 		}
 
 		usage
@@ -507,103 +531,138 @@ impl OpenAIAdapter {
 			match msg.role {
 				// For now, system and tool messages go to the system
 				ChatRole::System => {
-					if let MessageContent::Text(content) = msg.content {
+					if let Some(content) = msg.content.into_joined_texts() {
 						messages.push(json!({"role": "system", "content": content}))
 					}
 					// TODO: Probably need to warn if it is a ToolCalls type of content
 				}
-				ChatRole::User => {
-					let content = match msg.content {
-						MessageContent::Text(content) => json!(content),
-						MessageContent::Parts(parts) => {
-							json!(
-								parts
-									.iter()
-									.filter_map(|part| match part {
-										ContentPart::Text(text) => Some(json!({"type": "text", "text": text.clone()})),
-										ContentPart::Binary {
-											name,
-											content_type,
-											source,
-										} => {
-											if part.is_image() {
-												match source {
-													BinarySource::Url(url) => {
-														Some(json!({"type": "image_url", "image_url": {"url": url}}))
-													}
-													BinarySource::Base64(content) => {
-														let image_url = format!("data:{content_type};base64,{content}");
-														Some(
-															json!({"type": "image_url", "image_url": {"url": image_url}}),
-														)
-													}
-												}
-											} else {
-												match source {
-													BinarySource::Url(_url) => {
-														// TODO: Need to return error
-														warn!(
-															"OpenAI doesn't support file from URL, need to handle it gracefully"
-														);
-														None
-													}
-													BinarySource::Base64(content) => {
-														let file_data = format!("data:{content_type};base64,{content}");
-														Some(json!({"type": "file", "file": {
-															 "filename": name,
-															"file_data": file_data}
-														}))
-													}
-												}
 
-												// "type": "file",
-												// "file": {
-												//     "filename": "draconomicon.pdf",
-												//     "file_data": f"data:application/pdf;base64,{base64_string}",
-												// }
+				// User - For now support Text and Binary
+				ChatRole::User => {
+					// -- If we have only text, then, we jjust returned the joined_texts
+					if msg.content.is_text_only() {
+						// NOTE: for now, if no content, just return empty string (respect current logic)
+						let content = json!(msg.content.joined_texts().unwrap_or_else(String::new));
+						messages.push(json! ({"role": "user", "content": content}));
+					} else {
+						let mut values: Vec<Value> = Vec::new();
+						for part in msg.content {
+							match part {
+								ContentPart::Text(content) => values.push(json!({"type": "text", "text": content})),
+								ContentPart::Binary(binary) => {
+									let is_audio = binary.is_audio();
+									let is_image = binary.is_image();
+									let Binary {
+										content_type, source, ..
+									} = binary;
+
+									if is_audio {
+										match &source {
+											BinarySource::Url(_url) => {
+												warn!(
+													"OpenAI doesn't support audio from URL, need to handle it gracefully"
+												);
+											}
+											BinarySource::Base64(content) => {
+												let mut format = content_type.split('/').next_back().unwrap_or("");
+												if format == "mpeg" {
+													format = "mp3";
+												}
+												values.push(json!({
+													"type": "input_audio",
+													"input_audio": {
+														"data": content,
+														"format": format
+													}
+												}));
 											}
 										}
-									})
-									.collect::<Vec<Value>>()
-							)
+									} else if is_image {
+										match &source {
+											BinarySource::Url(url) => {
+												values.push(json!({"type": "image_url", "image_url": {"url": url}}))
+											}
+											BinarySource::Base64(content) => {
+												let image_url = format!("data:{};base64,{}", content_type, content);
+												values
+													.push(json!({"type": "image_url", "image_url": {"url": image_url}}))
+											}
+										}
+									} else {
+										match &source {
+											BinarySource::Url(_url) => {
+												// TODO: Need to return error
+												warn!(
+													"OpenAI doesn't support file from URL, need to handle it gracefully"
+												);
+											}
+											BinarySource::Base64(content) => {
+												let file_data = format!("data:{};base64,{}", content_type, content);
+												values.push(json!({"type": "file", "file": {
+													"filename": binary.name,
+													"file_data": file_data
+												}}))
+											}
+										}
+
+										// "type": "file",
+										// "file": {
+										//     "filename": "draconomicon.pdf",
+										//     "file_data": f"data:application/pdf;base64,{base64_string}",
+										// }
+									}
+								}
+
+								// Use `match` instead of `if let`. This will allow to future-proof this
+								// implementation in case some new message content types would appear,
+								// this way library would not compile if not all methods are implemented
+								// continue would allow to gracefully skip pushing unserializable message
+								// TODO: Probably need to warn if it is a ToolCalls type of content
+								ContentPart::ToolCall(_) => (),
+								ContentPart::ToolResponse(_) => (),
+							}
 						}
-						// Use `match` instead of `if let`. This will allow to future-proof this
-						// implementation in case some new message content types would appear,
-						// this way library would not compile if not all methods are implemented
-						// continue would allow to gracefully skip pushing unserializable message
-						// TODO: Probably need to warn if it is a ToolCalls type of content
-						MessageContent::ToolCalls(_) => continue,
-						MessageContent::ToolResponses(_) => continue,
-					};
-					messages.push(json! ({"role": "user", "content": content}));
+						messages.push(json! ({"role": "user", "content": values}));
+					}
 				}
 
-				ChatRole::Assistant => match msg.content {
-					MessageContent::Text(content) => messages.push(json! ({"role": "assistant", "content": content})),
-					MessageContent::ToolCalls(tool_calls) => {
-						let tool_calls = tool_calls
-							.into_iter()
-							.map(|tool_call| {
-								json!({
+				// Assistant - For now support Text and ToolCalls
+				ChatRole::Assistant => {
+					// -- If we have only text, then, we jjust returned the joined_texts
+					let mut texts: Vec<String> = Vec::new();
+					let mut tool_calls: Vec<Value> = Vec::new();
+					for part in msg.content {
+						match part {
+							ContentPart::Text(text) => texts.push(text),
+							ContentPart::ToolCall(tool_call) => {
+								//
+								tool_calls.push(json!({
 									"type": "function",
 									"id": tool_call.call_id,
 									"function": {
 										"name": tool_call.fn_name,
 										"arguments": tool_call.fn_arguments.to_string(),
 									}
-								})
-							})
-							.collect::<Vec<Value>>();
-						messages.push(json! ({"role": "assistant", "tool_calls": tool_calls, "content": ""}))
-					}
-					// TODO: Probably need to trace/warn that this will be ignored
-					MessageContent::Parts(_) => (),
-					MessageContent::ToolResponses(_) => (),
-				},
+								}))
+							}
 
+							// TODO: Probably need towarn on this one (probably need to add binary here)
+							ContentPart::Binary(_) => (),
+							ContentPart::ToolResponse(_) => (),
+						}
+					}
+					let content = texts.join("\n\n");
+					let mut message = json!({"role": "assistant", "content": content});
+					if !tool_calls.is_empty() {
+						message.x_insert("tool_calls", tool_calls)?;
+					}
+					messages.push(message);
+				}
+
+				// Tool - For now, support only tool responses
 				ChatRole::Tool => {
-					if let MessageContent::ToolResponses(tool_responses) = msg.content {
-						for tool_response in tool_responses {
+					for part in msg.content {
+						if let ContentPart::ToolResponse(tool_response) = part {
 							messages.push(json!({
 								"role": "tool",
 								"content": tool_response.content,
@@ -611,6 +670,7 @@ impl OpenAIAdapter {
 							}))
 						}
 					}
+
 					// TODO: Probably need to trace/warn that this will be ignored
 				}
 			}
@@ -649,26 +709,26 @@ fn extract_think(content: String) -> (String, Option<String>) {
 	let start_tag = "<think>";
 	let end_tag = "</think>";
 
-	if let Some(start) = content.find(start_tag) {
-		if let Some(end) = content[start + start_tag.len()..].find(end_tag) {
-			let start_pos = start;
-			let end_pos = start + start_tag.len() + end;
+	if let Some(start) = content.find(start_tag)
+		&& let Some(end) = content[start + start_tag.len()..].find(end_tag)
+	{
+		let start_pos = start;
+		let end_pos = start + start_tag.len() + end;
 
-			let think_content = &content[start_pos + start_tag.len()..end_pos];
-			let think_content = think_content.trim();
+		let think_content = &content[start_pos + start_tag.len()..end_pos];
+		let think_content = think_content.trim();
 
-			// Extract parts of the original content without cloning until necessary
-			let before_think = &content[..start_pos];
-			let after_think = &content[end_pos + end_tag.len()..];
+		// Extract parts of the original content without cloning until necessary
+		let before_think = &content[..start_pos];
+		let after_think = &content[end_pos + end_tag.len()..];
 
-			// Remove a leading newline in `after_think` if it starts with '\n'
-			let after_think = after_think.trim_start();
+		// Remove a leading newline in `after_think` if it starts with '\n'
+		let after_think = after_think.trim_start();
 
-			// Construct the final cleaned content in one allocation
-			let cleaned_content = format!("{before_think}{after_think}");
+		// Construct the final cleaned content in one allocation
+		let cleaned_content = format!("{before_think}{after_think}");
 
-			return (cleaned_content, Some(think_content.to_string()));
-		}
+		return (cleaned_content, Some(think_content.to_string()));
 	}
 
 	(content, None)

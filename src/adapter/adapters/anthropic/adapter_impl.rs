@@ -2,8 +2,8 @@ use crate::adapter::adapters::support::get_api_key;
 use crate::adapter::anthropic::AnthropicStreamer;
 use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{
-	BinarySource, ChatOptionsSet, ChatRequest, ChatResponse, ChatRole, ChatStream, ChatStreamResponse, ContentPart,
-	MessageContent, PromptTokensDetails, ToolCall, Usage,
+	Binary, BinarySource, ChatOptionsSet, ChatRequest, ChatResponse, ChatRole, ChatStream, ChatStreamResponse,
+	ContentPart, MessageContent, PromptTokensDetails, ReasoningEffort, ToolCall, Usage,
 };
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
@@ -19,6 +19,10 @@ use crate::adapter::ModelCapabilities;
 
 pub struct AnthropicAdapter;
 
+const REASONING_LOW: u32 = 1024;
+const REASONING_MEDIUM: u32 = 8000;
+const REASONING_HIGH: u32 = 24000;
+
 // NOTE: For Anthropic, the max_tokens must be specified.
 //       To avoid surprises, the default value for genai is the maximum for a given model.
 // Current logic:
@@ -32,7 +36,7 @@ pub struct AnthropicAdapter;
 // For max model tokens see: https://docs.anthropic.com/en/docs/about-claude/models/overview
 //
 // fall back
-const MAX_TOKENS_64K: u32 = 64000; // claude-3-7-sonnet, claude-sonnet-4
+const MAX_TOKENS_64K: u32 = 64000; // claude-3-7-sonnet, claude-sonnet-4.x, claude-haiku-4-5
 // custom
 const MAX_TOKENS_32K: u32 = 32000; // claude-opus-4
 const MAX_TOKENS_8K: u32 = 8192; // claude-3-5-sonnet, claude-3-5-haiku
@@ -40,12 +44,9 @@ const MAX_TOKENS_4K: u32 = 4096; // claude-3-opus, claude-3-haiku
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 const MODELS: &[&str] = &[
-	"claude-opus-4-20250514",
-	"claude-sonnet-4-20250514",
-	"claude-3-7-sonnet-latest",
-	"claude-3-5-haiku-latest",
-	"claude-3-opus-20240229",
-	"claude-3-haiku-20240307",
+	"claude-opus-4-1-20250805",
+	"claude-sonnet-4-5-20250929",
+	"claude-haiku-4-5-20251001",
 ];
 
 impl AnthropicAdapter {
@@ -84,7 +85,7 @@ impl Adapter for AnthropicAdapter {
 		let model_iden = ModelIden::new(kind, "temp");
 
 		// 获取 models API 的 URL
-		let url = Self::get_service_url(&model_iden, ServiceType::Models, endpoint);
+		let url = Self::get_service_url(&model_iden, ServiceType::Models, endpoint)?;
 
 		// 获取 API key
 		let api_key = get_api_key(auth, &model_iden)?;
@@ -153,13 +154,15 @@ impl Adapter for AnthropicAdapter {
 		Ok(models)
 	}
 
-	fn get_service_url(_model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> String {
+	fn get_service_url(_model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
 		let base_url = endpoint.base_url();
-		match service_type {
+		let url = match service_type {
 			ServiceType::Chat | ServiceType::ChatStream => format!("{base_url}messages"),
 			ServiceType::Embed => format!("{base_url}embeddings"), // Anthropic doesn't support embeddings yet
 			ServiceType::Models => format!("{base_url}models"),
-		}
+		};
+
+		Ok(url)
 	}
 
 	fn to_web_request_data(
@@ -174,7 +177,7 @@ impl Adapter for AnthropicAdapter {
 		let api_key = get_api_key(auth, &model)?;
 
 		// -- url
-		let url = Self::get_service_url(&model, service_type, endpoint);
+		let url = Self::get_service_url(&model, service_type, endpoint)?;
 
 		// -- headers
 		let headers = Headers::from(vec![
@@ -190,8 +193,44 @@ impl Adapter for AnthropicAdapter {
 			tools,
 		} = Self::into_anthropic_request_parts(chat_req)?;
 
+		// -- Extract Model Name and Reasoning
+		let (raw_model_name, _) = model.model_name.as_model_name_and_namespace();
+
+		let (model_name, thinking_budget) = match (raw_model_name, options_set.reasoning_effort()) {
+			// No explicity reasoning_effor, try to infer from model name suffix (supports -zero)
+			(model, None) => {
+				// let model_name: &str = &model.model_name;
+				if let Some((prefix, last)) = raw_model_name.rsplit_once('-') {
+					let reasoning = match last {
+						"zero" => None,    // That will disable thinking
+						"minimal" => None, // That will disable thinking
+						"low" => Some(REASONING_LOW),
+						"medium" => Some(REASONING_MEDIUM),
+						"high" => Some(REASONING_HIGH),
+						_ => None,
+					};
+					// create the model name if there was a `-..` reasoning suffix
+					let model = if reasoning.is_some() { prefix } else { model };
+					(model, reasoning)
+				} else {
+					(model, None)
+				}
+			}
+			// If reasoning effort, turn the low, medium, budget ones into Budget
+			(model, Some(effort)) => {
+				let effort = match effort {
+					// -- When minimal, same a zeror
+					ReasoningEffort::Minimal => None,
+					ReasoningEffort::Low => Some(REASONING_LOW),
+					ReasoningEffort::Medium => Some(REASONING_MEDIUM),
+					ReasoningEffort::High => Some(REASONING_HIGH),
+					ReasoningEffort::Budget(budget) => Some(*budget),
+				};
+				(model, effort)
+			}
+		};
+
 		// -- Build the basic payload
-		let (model_name, _) = model.model_name.as_model_name_and_namespace();
 		let stream = matches!(service_type, ServiceType::ChatStream);
 		let mut payload = json!({
 			"model": model_name.to_string(),
@@ -205,6 +244,17 @@ impl Adapter for AnthropicAdapter {
 
 		if let Some(tools) = tools {
 			payload.x_insert("/tools", tools)?;
+		}
+
+		// -- Set the reasoning effort
+		if let Some(budget) = thinking_budget {
+			payload.x_insert(
+				"thinking",
+				json!({
+					"type": "enabled",
+					"budget_tokens": budget
+				}),
+			)?;
 		}
 
 		// -- Add supported ChatOptions
@@ -223,7 +273,10 @@ impl Adapter for AnthropicAdapter {
 		// const MAX_TOKENS_4K: u32 = 4096; // claude-3-opus, claude-3-haiku
 		let max_tokens = options_set.max_tokens().unwrap_or_else(|| {
 			// most likely models used, so put first. Also a little wider with `claude-sonnet` (since name from version 4)
-			if model_name.contains("claude-sonnet") || model_name.contains("claude-3-7-sonnet") {
+			if model_name.contains("claude-sonnet")
+				|| model_name.contains("claude-haiku")
+				|| model_name.contains("claude-3-7-sonnet")
+			{
 				MAX_TOKENS_64K
 			} else if model_name.contains("claude-opus-4") {
 				MAX_TOKENS_32K
@@ -252,6 +305,7 @@ impl Adapter for AnthropicAdapter {
 		options_set: ChatOptionsSet<'_, '_>,
 	) -> Result<ChatResponse> {
 		let WebResponse { mut body, .. } = web_response;
+
 		let captured_raw_body = options_set.capture_raw_body().unwrap_or_default().then(|| body.clone());
 
 		// -- Capture the provider_model_iden
@@ -264,46 +318,50 @@ impl Adapter for AnthropicAdapter {
 		let usage = usage.map(Self::into_usage).unwrap_or_default();
 
 		// -- Capture the content
-		let mut content: Vec<MessageContent> = Vec::new();
+		let mut content: MessageContent = MessageContent::default();
 
 		// NOTE: Here we are going to concatenate all of the Anthropic text content items into one
 		//       genai MessageContent::Text. This is more in line with the OpenAI API style,
 		//       but loses the fact that they were originally separate items.
 		let json_content_items: Vec<Value> = body.x_take("content")?;
 
-		let mut text_content: Vec<String> = Vec::new();
-		// Note: here tool_calls is probably the exception, so not creating the vector if not needed
-		let mut tool_calls: Vec<ToolCall> = vec![];
+		let mut reasoning_content: Vec<String> = Vec::new();
 
 		for mut item in json_content_items {
 			let typ: &str = item.x_get_as("type")?;
-			if typ == "text" {
-				text_content.push(item.x_take("text")?);
-			} else if typ == "tool_use" {
-				let call_id = item.x_take::<String>("id")?;
-				let fn_name = item.x_take::<String>("name")?;
-				// if not found, will be Value::Null
-				let fn_arguments = item.x_take::<Value>("input").unwrap_or_default();
-				let tool_call = ToolCall {
-					call_id,
-					fn_name,
-					fn_arguments,
-				};
-				tool_calls.push(tool_call);
+			match typ {
+				"text" => {
+					let part = ContentPart::from_text(item.x_take::<String>("text")?);
+					content.push(part);
+				}
+				"thinking" => reasoning_content.push(item.x_take("thinking")?),
+				"tool_use" => {
+					let call_id = item.x_take::<String>("id")?;
+					let fn_name = item.x_take::<String>("name")?;
+					// if not found, will be Value::Null
+					let fn_arguments = item.x_take::<Value>("input").unwrap_or_default();
+					let tool_call = ToolCall {
+						call_id,
+						fn_name,
+						fn_arguments,
+					};
+
+					let part = ContentPart::ToolCall(tool_call);
+					content.push(part);
+				}
+				_ => (),
 			}
 		}
 
-		if !tool_calls.is_empty() {
-			content.push(MessageContent::from(tool_calls))
-		}
-
-		if !text_content.is_empty() {
-			content.push(MessageContent::from(text_content.join("\n")))
-		}
+		let reasoning_content = if !reasoning_content.is_empty() {
+			Some(reasoning_content.join("\n"))
+		} else {
+			None
+		};
 
 		Ok(ChatResponse {
 			content,
-			reasoning_content: None,
+			reasoning_content,
 			model_iden,
 			provider_model_iden,
 			usage,
@@ -446,133 +504,151 @@ impl AnthropicAdapter {
 			let is_cache_control = msg.options.map(|o| o.cache_control.is_some()).unwrap_or(false);
 
 			match msg.role {
-				// for now, system and tool messages go to the system
+				// Collect only text for system; other content parts are ignored by Anthropic here.
 				ChatRole::System => {
-					if let MessageContent::Text(content) = msg.content {
-						systems.push((content, is_cache_control))
+					if let Some(system_text) = msg.content.joined_texts() {
+						systems.push((system_text, is_cache_control));
 					}
-					// TODO: Needs to trace/warn that other types are not supported
 				}
+
+				// User message: text, binary (image/document), and tool_result supported.
 				ChatRole::User => {
-					let content = match msg.content {
-						MessageContent::Text(content) => apply_cache_control_to_text(is_cache_control, content),
-						MessageContent::Parts(parts) => {
-							let values = parts
-								.iter()
-								.filter_map(|part| match part {
-									ContentPart::Text(text) => Some(json!({"type": "text", "text": text})),
-									ContentPart::Binary {
-										name: _name,
-										content_type,
-										source,
-									} => {
-										//
-										if part.is_image() {
-											match source {
-												BinarySource::Url(_) => {
-													// TODO: Check if supported now
-													warn!(
-														"Anthropic doesn't support images from URL, need to handle it gracefully"
-													);
-													None
-												}
-												BinarySource::Base64(content) => Some(json!({
+					if msg.content.is_text_only() {
+						let text = msg.content.joined_texts().unwrap_or_else(String::new);
+						let content = apply_cache_control_to_text(is_cache_control, text);
+						messages.push(json!({"role": "user", "content": content}));
+					} else {
+						let mut values: Vec<Value> = Vec::new();
+						for part in msg.content {
+							match part {
+								ContentPart::Text(text) => {
+									values.push(json!({"type": "text", "text": text}));
+								}
+								ContentPart::Binary(binary) => {
+									let is_image = binary.is_image();
+									let Binary {
+										content_type, source, ..
+									} = binary;
+
+									if is_image {
+										match &source {
+											BinarySource::Url(_) => {
+												// As of this API version, Anthropic doesn't support images by URL directly in messages.
+												warn!(
+													"Anthropic doesn't support images from URL, need to handle it gracefully"
+												);
+											}
+											BinarySource::Base64(content) => {
+												values.push(json!({
 													"type": "image",
 													"source": {
 														"type": "base64",
 														"media_type": content_type,
 														"data": content,
-													},
-												})),
+													}
+												}));
 											}
-										} else {
-											match source {
-												BinarySource::Url(url) => Some(json!({
+										}
+									} else {
+										match &source {
+											BinarySource::Url(url) => {
+												values.push(json!({
 													"type": "document",
 													"source": {
 														"type": "url",
 														"url": url,
 													}
-												})),
-												BinarySource::Base64(b64) => Some(json!({
+												}));
+											}
+											BinarySource::Base64(b64) => {
+												values.push(json!({
 													"type": "document",
 													"source": {
 														"type": "base64",
 														"media_type": content_type,
 														"data": b64,
 													}
-												})),
+												}));
 											}
 										}
 									}
-								})
-								.collect::<Vec<Value>>();
-
-							let values = apply_cache_control_to_parts(is_cache_control, values);
-
-							json!(values)
+								}
+								// ToolCall is not valid in user content for Anthropic; skip gracefully.
+								ContentPart::ToolCall(_tc) => {}
+								ContentPart::ToolResponse(tool_response) => {
+									values.push(json!({
+										"type": "tool_result",
+										"content": tool_response.content,
+										"tool_use_id": tool_response.call_id,
+									}));
+								}
+							}
 						}
-						// Use `match` instead of `if let`. This will allow to future-proof this
-						// implementation in case some new message content types would appear,
-						// this way the library would not compile if not all methods are implemented
-						// continue would allow to gracefully skip pushing unserializable message
-						// TODO: Probably need to warn if it is a ToolCalls type of content
-						MessageContent::ToolCalls(_) => continue,
-						MessageContent::ToolResponses(_) => continue,
-					};
-					messages.push(json! ({"role": "user", "content": content}));
+						let values = apply_cache_control_to_parts(is_cache_control, values);
+						messages.push(json!({"role": "user", "content": values}));
+					}
 				}
+
+				// Assistant can mix text and tool_use entries.
 				ChatRole::Assistant => {
-					//
-					match msg.content {
-						MessageContent::Text(content) => {
-							let content = apply_cache_control_to_text(is_cache_control, content);
-							messages.push(json! ({"role": "assistant", "content": content}))
+					let mut values: Vec<Value> = Vec::new();
+					let mut has_tool_use = false;
+					let mut has_text = false;
+
+					for part in msg.content {
+						match part {
+							ContentPart::Text(text) => {
+								has_text = true;
+								values.push(json!({"type": "text", "text": text}));
+							}
+							ContentPart::ToolCall(tool_call) => {
+								has_tool_use = true;
+								// see: https://docs.anthropic.com/en/docs/build-with-claude/tool-use#example-of-successful-tool-result
+								values.push(json!({
+									"type": "tool_use",
+									"id": tool_call.call_id,
+									"name": tool_call.fn_name,
+									"input": tool_call.fn_arguments,
+								}));
+							}
+							// Unsupported for assistant role in Anthropic message content
+							ContentPart::Binary(_) => {}
+							ContentPart::ToolResponse(_) => {}
 						}
-						MessageContent::ToolCalls(tool_calls) => {
-							let tool_calls = tool_calls
-								.into_iter()
-								.map(|tool_call| {
-									// see: https://docs.anthropic.com/en/docs/build-with-claude/tool-use#example-of-successful-tool-result
-									json!({
-										"type": "tool_use",
-										"id": tool_call.call_id,
-										"name": tool_call.fn_name,
-										"input": tool_call.fn_arguments,
-									})
-								})
-								.collect::<Vec<Value>>();
-							let tool_calls = apply_cache_control_to_parts(is_cache_control, tool_calls);
-							messages.push(json! ({
-								"role": "assistant",
-								"content": tool_calls
+					}
+
+					if !has_tool_use && has_text && !is_cache_control && values.len() == 1 {
+						// Optimize to simple string when it's only one text part and no cache control.
+						let text = values
+							.first()
+							.and_then(|v| v.get("text"))
+							.and_then(|v| v.as_str())
+							.unwrap_or_default()
+							.to_string();
+						let content = apply_cache_control_to_text(false, text);
+						messages.push(json!({"role": "assistant", "content": content}));
+					} else {
+						let values = apply_cache_control_to_parts(is_cache_control, values);
+						messages.push(json!({"role": "assistant", "content": values}));
+					}
+				}
+
+				// Tool responses are represented as user tool_result items in Anthropic.
+				ChatRole::Tool => {
+					let mut values: Vec<Value> = Vec::new();
+					for part in msg.content {
+						if let ContentPart::ToolResponse(tool_response) = part {
+							values.push(json!({
+								"type": "tool_result",
+								"content": tool_response.content,
+								"tool_use_id": tool_response.call_id,
 							}));
 						}
-						// TODO: Probably need to trace/warn that this will be ignored
-						MessageContent::Parts(_) => (),
-						MessageContent::ToolResponses(_) => (),
 					}
-				}
-				ChatRole::Tool => {
-					if let MessageContent::ToolResponses(tool_responses) = msg.content {
-						let tool_responses = tool_responses
-							.into_iter()
-							.map(|tool_response| {
-								json!({
-									"type": "tool_result",
-									"content": tool_response.content,
-									"tool_use_id": tool_response.call_id,
-								})
-							})
-							.collect::<Vec<Value>>();
-						let tool_responses = apply_cache_control_to_parts(is_cache_control, tool_responses);
-						// FIXME: MessageContent::ToolResponse should be MessageContent::ToolResponses (even if OpenAI does require multi Tool message)
-						messages.push(json!({
-							"role": "user",
-							"content": tool_responses
-						}));
+					if !values.is_empty() {
+						let values = apply_cache_control_to_parts(is_cache_control, values);
+						messages.push(json!({"role": "user", "content": values}));
 					}
-					// TODO: Probably need to trace/warn that this will be ignored
 				}
 			}
 		}

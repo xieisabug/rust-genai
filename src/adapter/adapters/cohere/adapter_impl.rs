@@ -69,7 +69,7 @@ impl Adapter for CohereAdapter {
 		let model_iden = ModelIden::new(kind, "temp");
 
 		// 获取 models API 的 URL
-		let url = Self::get_service_url(&model_iden, ServiceType::Models, endpoint);
+		let url = Self::get_service_url(&model_iden, ServiceType::Models, endpoint)?;
 
 		// 获取 API key
 		let api_key = get_api_key(auth, &model_iden)?;
@@ -126,9 +126,9 @@ impl Adapter for CohereAdapter {
 		Ok(models)
 	}
 
-	fn get_service_url(_model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> String {
+	fn get_service_url(_model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
 		let base_url = endpoint.base_url();
-		match service_type {
+		let url = match service_type {
 			ServiceType::Chat | ServiceType::ChatStream => format!("{base_url}chat"),
 			ServiceType::Embed => {
 				//HACK: Cohere embeddings use v2 API, but base_url is v1, so we need to replace it
@@ -136,7 +136,8 @@ impl Adapter for CohereAdapter {
 				format!("{base_without_version}v2/embed")
 			}
 			ServiceType::Models => format!("{base_url}models"),
-		}
+		};
+		Ok(url)
 	}
 
 	fn to_web_request_data(
@@ -151,7 +152,7 @@ impl Adapter for CohereAdapter {
 		let api_key = get_api_key(auth, &model)?;
 
 		// -- url
-		let url = Self::get_service_url(&model, service_type, endpoint);
+		let url = Self::get_service_url(&model, service_type, endpoint)?;
 
 		// -- headers
 		let headers = Headers::from(("Authorization".to_string(), format!("Bearer {api_key}")));
@@ -221,9 +222,9 @@ impl Adapter for CohereAdapter {
 			return Err(Error::NoChatResponse { model_iden });
 		};
 
-		let content: Vec<MessageContent> = last_chat_history_item
+		let content: MessageContent = last_chat_history_item
 			.x_take::<Option<String>>("message")?
-			.map(|c| vec![MessageContent::from(c)])
+			.map(MessageContent::from)
 			.unwrap_or_default();
 
 		Ok(ChatResponse {
@@ -360,7 +361,7 @@ impl CohereAdapter {
 		}
 
 		// TODO: Needs to implement tool_calls
-		let MessageContent::Text(message) = last_chat_msg.content else {
+		let Some(message) = last_chat_msg.content.into_joined_texts() else {
 			return Err(Error::MessageContentTypeNotSupported {
 				model_iden,
 				cause: "Only MessageContent::Text supported for this model (for now)",
@@ -369,7 +370,7 @@ impl CohereAdapter {
 
 		// -- Build
 		for msg in chat_req.messages {
-			let MessageContent::Text(content) = msg.content else {
+			let Some(content) = msg.content.into_joined_texts() else {
 				return Err(Error::MessageContentTypeNotSupported {
 					model_iden,
 					cause: "Only MessageContent::Text supported for this model (for now)",

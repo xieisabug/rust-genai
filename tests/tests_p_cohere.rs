@@ -4,9 +4,9 @@ use crate::support::{Check, TestResult, common_tests};
 use genai::adapter::AdapterKind;
 use genai::resolver::AuthData;
 
-const MODEL: &str = "command-r"; // Updated to use more capable model
-const MODEL_NS: &str = "cohere::command-r";
-const VISION_MODEL: &str = "aya-vision-8b"; // For vision tests
+const MODEL: &str = "command-r7b-12-2024"; // Cohere newer command-r variant
+const MODEL_NS: &str = "cohere::command-r7b-12-2024";
+const VISION_MODEL: &str = "aya-vision-8b"; // Vision model for image tests
 
 // region:    --- Chat
 

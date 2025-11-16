@@ -129,6 +129,7 @@ impl ModelCapabilities {
 	fn provider_supports_streaming(kind: AdapterKind, model_id: &str) -> Option<bool> {
 		match kind {
 			AdapterKind::OpenAI => Some(Self::openai_supports_streaming(model_id)),
+			AdapterKind::OpenAIResp => Some(Self::openai_supports_streaming(model_id)),
 			AdapterKind::Anthropic
 			| AdapterKind::Cohere
 			| AdapterKind::DeepSeek
@@ -139,13 +140,14 @@ impl ModelCapabilities {
 			| AdapterKind::Xai
 			| AdapterKind::Nebius
 			| AdapterKind::Ollama
-			| AdapterKind::Zhipu => Some(true),
+			| AdapterKind::Zai => Some(true),
 		}
 	}
 
 	fn provider_supports_json_mode(kind: AdapterKind, model_id: &str) -> Option<bool> {
 		match kind {
 			AdapterKind::OpenAI => Some(Self::openai_supports_json_mode(model_id)),
+			AdapterKind::OpenAIResp => Some(Self::openai_supports_json_mode(model_id)),
 			AdapterKind::Cohere => Some(Self::cohere_supports_json_mode(model_id)),
 			AdapterKind::DeepSeek => Some(Self::deepseek_supports_json_mode(model_id)),
 			AdapterKind::Anthropic | AdapterKind::Gemini => Some(false),
@@ -155,13 +157,14 @@ impl ModelCapabilities {
 			| AdapterKind::Xai
 			| AdapterKind::Nebius
 			| AdapterKind::Ollama
-			| AdapterKind::Zhipu => Some(true),
+			| AdapterKind::Zai => Some(true),
 		}
 	}
 
 	fn provider_supports_reasoning(kind: AdapterKind, model_id: &str) -> Option<bool> {
 		match kind {
 			AdapterKind::OpenAI => Some(Self::openai_supports_reasoning(model_id)),
+			AdapterKind::OpenAIResp => Some(Self::openai_supports_reasoning(model_id)),
 			AdapterKind::Anthropic => Some(
 				model_id.contains("claude-4")
 					|| model_id.contains("claude-opus-4")
@@ -176,8 +179,8 @@ impl ModelCapabilities {
 				// Only these xAI models support "通用推理" (general reasoning) according to official docs
 				model_id == "grok-4-0709" || model_id == "grok-3-mini" || model_id == "grok-3-mini-fast",
 			),
-			AdapterKind::Zhipu => Some(
-				// Zhipu thinking models support reasoning according to official docs
+			AdapterKind::Zai => Some(
+				// Zai (GLM) thinking models support reasoning according to official docs
 				model_id.contains("glm-4.5") && !model_id.contains("air"),
 			),
 			_ => None,
@@ -239,9 +242,9 @@ impl ModelCapabilities {
 				}
 				Some(set)
 			}
-			AdapterKind::Zhipu => {
+			AdapterKind::Zai => {
 				let mut set = HashSet::from([Modality::Text]);
-				// Zhipu vision models support image input (verified from official docs 2025)
+				// Zai vision models support image input (verified from official docs 2025)
 				if model_id.contains("4v") || model_id.contains("vision") {
 					set.insert(Modality::Image);
 				}
@@ -309,8 +312,8 @@ impl ModelCapabilities {
 					None
 				}
 			}
-			AdapterKind::Zhipu => {
-				// Zhipu thinking models support effort control (verified from official docs 2025)
+			AdapterKind::Zai => {
+				// Zai thinking models support effort control (verified from official docs 2025)
 				if model_id.contains("glm-4.5") && !model_id.contains("air") {
 					Some(vec![ReasoningEffortType::High])
 				} else {
@@ -326,6 +329,7 @@ impl ModelCapabilities {
 	fn provider_token_limits(kind: AdapterKind, model_id: &str) -> Option<(Option<u32>, Option<u32>)> {
 		match kind {
 			AdapterKind::OpenAI => Self::openai_specific_token_limits(model_id),
+			AdapterKind::OpenAIResp => Self::openai_specific_token_limits(model_id),
 			AdapterKind::Anthropic => Self::anthropic_token_limits(model_id),
 			AdapterKind::Cohere => Self::cohere_token_limits(model_id),
 			AdapterKind::DeepSeek => Self::deepseek_token_limits(model_id),
@@ -336,7 +340,7 @@ impl ModelCapabilities {
 			AdapterKind::Xai => Self::xai_token_limits(model_id),
 			AdapterKind::Nebius => Self::nebius_token_limits(model_id),
 			AdapterKind::Ollama => Self::ollama_token_limits(model_id),
-			AdapterKind::Zhipu => Self::zhipu_token_limits(model_id),
+			AdapterKind::Zai => Self::zai_token_limits(model_id),
 		}
 	}
 
@@ -534,7 +538,7 @@ impl ModelCapabilities {
 		Some((Some(32_768), Some(8_192)))
 	}
 
-	fn zhipu_token_limits(model_id: &str) -> Option<(Option<u32>, Option<u32>)> {
+	fn zai_token_limits(model_id: &str) -> Option<(Option<u32>, Option<u32>)> {
 		let res = match model_id {
 			// --- GLM-4.5 Series (verified from official docs 2025) ---
 			"glm-4.5" => (Some(128_000), Some(32_768)), // 128K context, estimate 32K output

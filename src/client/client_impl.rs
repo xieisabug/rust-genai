@@ -4,20 +4,22 @@ use crate::embed::{EmbedOptions, EmbedOptionsSet, EmbedRequest, EmbedResponse};
 use crate::resolver::AuthData;
 use crate::{Client, Error, Model, ModelIden, Result, ServiceTarget};
 
-/// Public AI Functions
+/// High-level client APIs.
 impl Client {
-	/// Returns all the model names for a given adapter kind.
-	///
-	/// IMPORTANT:
-	/// - Besides the Ollama adapter, this will only look at a hardcoded static list of names for now.
-	/// - For Ollama, it will currently make a live request to the default host/port (http://localhost:11434/v1/).
-	/// - This function will eventually change to either take an endpoint or have another function to allow a custom endpoint.
-	/// - Except for groq and deepseek, those names are used to match AdapterKind to Model name (see [`AdapterKind`]) for this.
+	/// Lists model names for the given adapter.
 	///
 	/// Notes:
-	/// - Since genai only supports Chat for now, the adapter implementation should attempt to remove the non-chat models.
-	/// - Later, as genai adds more capabilities, we will have a `model_names(adapter_kind, Option<&[Skill]>)`
-	///   that will take a list of skills like (`ChatText`, `ChatImage`, `ChatFunction`, `TextToSpeech`, ...).
+	///
+	/// - Non-Ollama adapters use a static list.
+	///
+	/// - Ollama queries the default host (http://localhost:11434/v1/).
+	///
+	/// - May evolve to accept a custom endpoint.
+	///
+	/// - For most adapters, names also drive AdapterKind detection (see [`AdapterKind`]).
+	///
+	/// - Adapters should filter non-chat models until more skills are supported.
+	///   Future: `model_names(adapter_kind, Option<&[Skill]>)`.
 	pub async fn all_model_names(&self, adapter_kind: AdapterKind) -> Result<Vec<String>> {
 		let models = AdapterDispatcher::all_model_names(adapter_kind).await?;
 		Ok(models)
@@ -29,8 +31,7 @@ impl Client {
 		Ok(models)
 	}
 
-	/// Return the default model for a model_name str.
-	/// This is used before
+	/// Builds a ModelIden by inferring AdapterKind from the model name.
 	pub fn default_model(&self, model_name: &str) -> Result<ModelIden> {
 		// -- First get the default ModelInfo
 		let adapter_kind = AdapterKind::from_model(model_name)?;
@@ -38,6 +39,7 @@ impl Client {
 		Ok(model_iden)
 	}
 
+	/// Deprecated: use `Client::resolve_service_target`.
 	#[deprecated(note = "use `client.resolve_service_target(model_name)`")]
 	pub async fn resolve_model_iden(&self, model_name: &str) -> Result<ModelIden> {
 		let model = self.default_model(model_name)?;
@@ -45,6 +47,7 @@ impl Client {
 		Ok(target.model)
 	}
 
+	/// Resolves the service target (endpoint, auth, and model) for the given model name.
 	pub async fn resolve_service_target(&self, model_name: &str) -> Result<ServiceTarget> {
 		let model = self.default_model(model_name)?;
 		self.config().resolve_service_target(model).await
@@ -54,7 +57,7 @@ impl Client {
 		self.config().resolve_service_target_without_model(adapter_kind).await
 	}
 
-	/// Executes a chat.
+	/// Sends a chat request and returns the full response.
 	pub async fn exec_chat(
 		&self,
 		model: &str,
@@ -69,9 +72,22 @@ impl Client {
 		let model = self.default_model(model)?;
 		let target = self.config().resolve_service_target(model).await?;
 		let model = target.model.clone();
+		let auth_data = target.auth.clone();
 
-		let WebRequestData { headers, payload, url } =
-			AdapterDispatcher::to_web_request_data(target, ServiceType::Chat, chat_req, options_set.clone())?;
+		let WebRequestData {
+			mut url,
+			mut headers,
+			payload,
+		} = AdapterDispatcher::to_web_request_data(target, ServiceType::Chat, chat_req, options_set.clone())?;
+
+		if let AuthData::RequestOverride {
+			url: override_url,
+			headers: override_headers,
+		} = auth_data
+		{
+			url = override_url;
+			headers = override_headers;
+		};
 
 		let web_res =
 			self.web_client()
@@ -87,7 +103,7 @@ impl Client {
 		Ok(chat_res)
 	}
 
-	/// Executes a chat stream response.
+	/// Streams a chat response.
 	pub async fn exec_chat_stream(
 		&self,
 		model: &str,
@@ -134,7 +150,7 @@ impl Client {
 		Ok(res)
 	}
 
-	/// Executes an embedding request for a single text input.
+	/// Creates embeddings for a single input string.
 	pub async fn embed(
 		&self,
 		model: &str,
@@ -145,7 +161,7 @@ impl Client {
 		self.exec_embed(model, embed_req, options).await
 	}
 
-	/// Executes an embedding request for multiple text inputs (batch operation).
+	/// Creates embeddings for multiple input strings.
 	pub async fn embed_batch(
 		&self,
 		model: &str,
@@ -156,7 +172,7 @@ impl Client {
 		self.exec_embed(model, embed_req, options).await
 	}
 
-	/// Executes an embedding request.
+	/// Sends an embedding request and returns the response.
 	pub async fn exec_embed(
 		&self,
 		model: &str,

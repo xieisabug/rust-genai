@@ -8,7 +8,35 @@ use crate::{Model, ModelIden, ModelName};
 use crate::{Result, ServiceTarget};
 use reqwest::RequestBuilder;
 
-pub struct ZhipuAdapter;
+/// Helper structure to hold ZAI model parsing information
+struct ZaiModelEndpoint {
+	endpoint: Endpoint,
+}
+
+impl ZaiModelEndpoint {
+	/// Parse ModelIden to determine if it's a coding model and return endpoint
+	fn from_model(model: &ModelIden) -> Self {
+		let (_, namespace) = model.model_name.as_model_name_and_namespace();
+
+		// Check if namespace is "zai" to route to coding endpoint
+		let endpoint = match namespace {
+			Some("zai") => Endpoint::from_static("https://api.z.ai/api/coding/paas/v4/"),
+			_ => ZaiAdapter::default_endpoint(),
+		};
+
+		Self { endpoint }
+	}
+}
+
+/// The ZAI API is mostly compatible with the OpenAI API.
+///
+/// NOTE: This adapter will automatically route to the coding endpoint
+///       when the model name starts with "zai::".
+///
+/// For example, `glm-4.6` uses the regular API endpoint,
+/// while `zai::glm-4.6` uses the coding plan endpoint.
+///
+pub struct ZaiAdapter;
 
 // Updated Zhipu AI model list based on official documentation (2025) - newer on top
 pub(in crate::adapter) const MODELS: &[&str] = &[
@@ -22,6 +50,11 @@ pub(in crate::adapter) const MODELS: &[&str] = &[
 	"glm-4-32b-0414-128k", // High intelligence at unmatched cost-efficiency
 	// --- Legacy GLM-4 Series (maintaining backward compatibility) ---
 	"glm-4-plus",
+	"glm-4.6",
+	"glm-4.5v",
+	"glm-4-air-250414",
+	"glm-4-flashx-250414",
+	"glm-4-flash-250414",
 	"glm-4-air",
 	"glm-4-airx",
 	"glm-4-flash",
@@ -36,17 +69,16 @@ pub(in crate::adapter) const MODELS: &[&str] = &[
 	"glm-z1-flashx",
 	"glm-4.1v-thinking-flash",
 	"glm-4.1v-thinking-flashx",
-	"glm-4.5",
 ];
 
-impl ZhipuAdapter {
-	pub const API_KEY_DEFAULT_ENV_NAME: &str = "ZHIPU_API_KEY";
+impl ZaiAdapter {
+	pub const API_KEY_DEFAULT_ENV_NAME: &str = "ZAI_API_KEY";
 }
 
-// The Zhipu API is mostly compatible with the OpenAI API.
-impl Adapter for ZhipuAdapter {
+// The ZAI API is mostly compatible with the OpenAI API.
+impl Adapter for ZaiAdapter {
 	fn default_endpoint() -> Endpoint {
-		const BASE_URL: &str = "https://open.bigmodel.cn/api/paas/v4/";
+		const BASE_URL: &str = "https://api.z.ai/api/paas/v4/";
 		Endpoint::from_static(BASE_URL)
 	}
 
@@ -59,28 +91,35 @@ impl Adapter for ZhipuAdapter {
 	}
 
 	async fn all_models(_kind: AdapterKind, _target: ServiceTarget) -> Result<Vec<Model>> {
-		// Zhipu AI doesn't have a models API endpoint, so we build models from the hardcoded list
+		// ZAI doesn't have a models endpoint; build from hardcoded list
 		let mut models: Vec<Model> = Vec::new();
-
-		// For each model ID, create a Model object with capabilities
 		for model_id in MODELS {
-			let model = Self::parse_zhipu_model_to_model(model_id.to_string())?;
+			let model = Self::parse_zai_model_to_model(model_id.to_string())?;
 			models.push(model);
 		}
-
 		Ok(models)
 	}
 
-	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> String {
-		OpenAIAdapter::util_get_service_url(model, service_type, endpoint)
+	fn get_service_url(_model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
+		let base_url = endpoint.base_url();
+		let url = match service_type {
+			ServiceType::Chat | ServiceType::ChatStream => format!("{base_url}chat/completions"),
+			ServiceType::Embed => format!("{base_url}embeddings"),
+			ServiceType::Models => format!("{base_url}models"), // Might not be supported; placeholder
+		};
+		Ok(url)
 	}
 
 	fn to_web_request_data(
-		target: ServiceTarget,
+		mut target: ServiceTarget,
 		service_type: ServiceType,
 		chat_req: ChatRequest,
 		chat_options: ChatOptionsSet<'_, '_>,
 	) -> Result<WebRequestData> {
+		// Parse model name and determine appropriate endpoint
+		let zai_info = ZaiModelEndpoint::from_model(&target.model);
+		target.endpoint = zai_info.endpoint;
+
 		OpenAIAdapter::util_to_web_request_data(target, service_type, chat_req, chat_options, None)
 	}
 
@@ -101,10 +140,13 @@ impl Adapter for ZhipuAdapter {
 	}
 
 	fn to_embed_request_data(
-		service_target: crate::ServiceTarget,
+		mut service_target: crate::ServiceTarget,
 		embed_req: crate::embed::EmbedRequest,
 		options_set: crate::embed::EmbedOptionsSet<'_, '_>,
 	) -> Result<crate::adapter::WebRequestData> {
+		let zai_info = ZaiModelEndpoint::from_model(&service_target.model);
+		service_target.endpoint = zai_info.endpoint;
+
 		OpenAIAdapter::to_embed_request_data(service_target, embed_req, options_set)
 	}
 
@@ -119,29 +161,30 @@ impl Adapter for ZhipuAdapter {
 
 // region:    --- Support Functions
 
-/// Support functions for ZhipuAdapter
-impl ZhipuAdapter {
-	/// Convert a Zhipu model ID to a complete Model object with capabilities
-	fn parse_zhipu_model_to_model(model_id: String) -> Result<Model> {
+
+/// Support functions for ZaiAdapter
+impl ZaiAdapter {
+	/// Convert a Zai (GLM) model ID to a complete Model object with capabilities
+	fn parse_zai_model_to_model(model_id: String) -> Result<Model> {
 		let model_name: ModelName = model_id.clone().into();
 		let mut model = Model::new(model_name, model_id.clone());
 
-		// Set Zhipu model capabilities using the ModelCapabilities system
+		// Set Zai model capabilities using the ModelCapabilities system
 		let (max_input_tokens, max_output_tokens) =
-			ModelCapabilities::infer_token_limits(AdapterKind::Zhipu, &model_id);
-		let supports_reasoning = ModelCapabilities::supports_reasoning(AdapterKind::Zhipu, &model_id);
+			ModelCapabilities::infer_token_limits(AdapterKind::Zai, &model_id);
+		let supports_reasoning = ModelCapabilities::supports_reasoning(AdapterKind::Zai, &model_id);
 
 		model = model
 			.with_max_input_tokens(max_input_tokens)
 			.with_max_output_tokens(max_output_tokens)
-			.with_streaming(ModelCapabilities::supports_streaming(AdapterKind::Zhipu, &model_id))
-			.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Zhipu, &model_id))
-			.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Zhipu, &model_id))
+			.with_streaming(ModelCapabilities::supports_streaming(AdapterKind::Zai, &model_id))
+			.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Zai, &model_id))
+			.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Zai, &model_id))
 			.with_reasoning(supports_reasoning);
 
 		// Set input/output modalities
-		let input_modalities = ModelCapabilities::infer_input_modalities(AdapterKind::Zhipu, &model_id);
-		let output_modalities = ModelCapabilities::infer_output_modalities(AdapterKind::Zhipu, &model_id);
+		let input_modalities = ModelCapabilities::infer_input_modalities(AdapterKind::Zai, &model_id);
+		let output_modalities = ModelCapabilities::infer_output_modalities(AdapterKind::Zai, &model_id);
 
 		model = model
 			.with_input_modalities(input_modalities)
@@ -149,7 +192,7 @@ impl ZhipuAdapter {
 
 		// If supports reasoning, set reasoning effort levels
 		if supports_reasoning {
-			let reasoning_efforts = ModelCapabilities::infer_reasoning_efforts(AdapterKind::Zhipu, &model_id);
+			let reasoning_efforts = ModelCapabilities::infer_reasoning_efforts(AdapterKind::Zai, &model_id);
 			model = model.with_reasoning_efforts(reasoning_efforts);
 		}
 
