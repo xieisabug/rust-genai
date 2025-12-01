@@ -150,10 +150,15 @@ pub struct CopilotUsage {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct CopilotStreamResponse {
+	#[serde(default)]
 	pub id: String,
+	#[serde(default)]
 	pub object: String,
+	#[serde(default)]
 	pub created: u64,
+	#[serde(default)]
 	pub model: String,
+	#[serde(default)]
 	pub choices: Vec<CopilotStreamChoice>,
 }
 

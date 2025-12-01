@@ -29,12 +29,12 @@ async fn test_chat_json_mode_ok() -> TestResult<()> {
 
 #[tokio::test]
 async fn test_chat_stream_simple_ok() -> TestResult<()> {
-	common_tests::common_test_chat_stream_simple_ok(MODEL, None).await
+	common_tests::common_test_chat_stream_simple_ok(MODEL_NS, None).await
 }
 
 #[tokio::test]
 async fn test_chat_stream_capture_content_ok() -> TestResult<()> {
-	common_tests::common_test_chat_stream_capture_content_ok(MODEL).await
+	common_tests::common_test_chat_stream_capture_content_ok(MODEL_NS).await
 }
 
 // endregion: --- Chat Stream

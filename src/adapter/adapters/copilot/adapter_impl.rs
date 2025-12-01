@@ -431,12 +431,12 @@ impl Adapter for CopilotAdapter {
 	fn to_chat_stream(
 		model_iden: ModelIden,
 		reqwest_builder: RequestBuilder,
-		_options_set: ChatOptionsSet<'_, '_>,
+		options_set: ChatOptionsSet<'_, '_>,
 	) -> Result<ChatStreamResponse> {
 		use crate::chat::ChatStream;
 		
 		let event_source = EventSource::new(reqwest_builder)?;
-		let streamer = CopilotStreamer::new(event_source, model_iden.clone());
+		let streamer = CopilotStreamer::new(event_source, model_iden.clone(), options_set);
 		let chat_stream = ChatStream::from_inter_stream(streamer);
 
 		Ok(ChatStreamResponse {

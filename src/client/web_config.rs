@@ -8,6 +8,8 @@ pub struct WebConfig {
 	pub read_timeout: Option<Duration>,
 	pub default_headers: Option<reqwest::header::HeaderMap>,
 	pub proxy: Option<reqwest::Proxy>,
+	/// Disable SSL certificate verification (useful for debugging with tools like Burp Suite)
+	pub danger_accept_invalid_certs: bool,
 }
 
 impl WebConfig {
@@ -56,6 +58,16 @@ impl WebConfig {
 		Ok(self)
 	}
 
+	/// Disables SSL certificate verification.
+	/// 
+	/// # Warning
+	/// This should only be used for debugging purposes (e.g., with Burp Suite).
+	/// Never use this in production!
+	pub fn with_danger_accept_invalid_certs(mut self, accept: bool) -> Self {
+		self.danger_accept_invalid_certs = accept;
+		self
+	}
+
 	/// Applies this config to a reqwest::ClientBuilder.
 	pub fn apply_to_builder(&self, mut builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
 		if let Some(timeout) = self.timeout {
@@ -72,6 +84,9 @@ impl WebConfig {
 		}
 		if let Some(ref proxy) = self.proxy {
 			builder = builder.proxy(proxy.clone());
+		}
+		if self.danger_accept_invalid_certs {
+			builder = builder.danger_accept_invalid_certs(true);
 		}
 		builder
 	}
