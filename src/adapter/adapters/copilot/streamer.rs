@@ -39,7 +39,9 @@ impl Stream for CopilotStreamer {
 
 		while let Poll::Ready(event) = Pin::new(&mut self.event_source).poll_next(cx) {
 			match event {
-				Some(Ok(Event::Open)) => return Poll::Ready(Some(Ok(InterStreamEvent::Start))),
+				Some(Ok(Event::Open)) => {
+					return Poll::Ready(Some(Ok(InterStreamEvent::Start)));
+				}
 				Some(Ok(Event::Message(message))) => {
 					let data = message.data;
 
@@ -56,7 +58,7 @@ impl Stream for CopilotStreamer {
 					}
 
 					// Parse the stream response
-					let stream_response: CopilotStreamResponse = match from_str(&data) {
+					let stream_response: CopilotStreamResponse = match from_str::<CopilotStreamResponse>(&data) {
 						Ok(resp) => resp,
 						Err(e) => {
 							return Poll::Ready(Some(Err(Error::Internal(format!(
