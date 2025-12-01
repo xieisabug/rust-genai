@@ -32,7 +32,7 @@ impl Adapter for TogetherAdapter {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 
-	async fn all_models(_kind: AdapterKind, _target: ServiceTarget) -> Result<Vec<Model>> {
+	async fn all_models(_kind: AdapterKind, _target: ServiceTarget, _web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
 		// For together, there are too many models to list.
 		// The models are handled dynamically based on the model name.
 		// Return empty vector for now since the MODELS constant is empty.

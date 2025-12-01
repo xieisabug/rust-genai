@@ -60,15 +60,14 @@ impl Adapter for OllamaAdapter {
 		Ok(models)
 	}
 
-	async fn all_models(adapter_kind: AdapterKind, target: ServiceTarget) -> Result<Vec<Model>> {
+	async fn all_models(adapter_kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
 		// FIXME: This is hardcoded to the default endpoint; it should take the endpoint as an argument.
 		let endpoint = target.endpoint;
 		let base_url = endpoint.base_url();
 		let url = format!("{base_url}models");
 
-		// TODO: Need to get the WebClient from the client.
-		let web_c = crate::webc::WebClient::default();
-		let mut res = web_c.do_get(&url, &[]).await.map_err(|webc_error| Error::WebAdapterCall {
+		// Use the passed WebClient to send request
+		let mut res = web_client.do_get(&url, &[]).await.map_err(|webc_error| Error::WebAdapterCall {
 			adapter_kind,
 			webc_error,
 		})?;

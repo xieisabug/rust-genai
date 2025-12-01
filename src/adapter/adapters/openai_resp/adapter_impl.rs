@@ -43,7 +43,7 @@ impl Adapter for OpenAIRespAdapter {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 
-	async fn all_models(kind: AdapterKind, _target: ServiceTarget) -> Result<Vec<Model>> {
+	async fn all_models(kind: AdapterKind, _target: ServiceTarget, _web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
 		let names = Self::all_model_names(kind).await?;
 		let mut models: Vec<Model> = Vec::new();
 		for id in names {

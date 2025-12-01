@@ -90,7 +90,7 @@ impl Adapter for ZaiAdapter {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 
-	async fn all_models(_kind: AdapterKind, _target: ServiceTarget) -> Result<Vec<Model>> {
+	async fn all_models(_kind: AdapterKind, _target: ServiceTarget, _web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
 		// ZAI doesn't have a models endpoint; build from hardcoded list
 		let mut models: Vec<Model> = Vec::new();
 		for model_id in MODELS {

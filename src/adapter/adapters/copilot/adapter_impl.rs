@@ -233,7 +233,7 @@ impl Adapter for CopilotAdapter {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 
-	async fn all_models(kind: AdapterKind, target: ServiceTarget) -> Result<Vec<Model>> {
+	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
 		use crate::adapter::adapters::support::get_api_key;
 		use value_ext::JsonValueExt;
 		
@@ -258,8 +258,7 @@ impl Adapter for CopilotAdapter {
 			("x-github-api-version".to_string(), "2025-05-01".to_string()),
 		];
 
-		// Create WebClient and send request
-		let web_client = crate::webc::WebClient::default();
+		// Use the passed WebClient to send request
 		let mut web_response = web_client
 			.do_get(&url, &headers)
 			.await

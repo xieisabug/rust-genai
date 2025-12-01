@@ -35,7 +35,7 @@ impl Adapter for DeepSeekAdapter {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 
-	async fn all_models(kind: AdapterKind, target: ServiceTarget) -> Result<Vec<Model>> {
+	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
 		// 使用默认的认证和端点配置
 		let auth = target.auth;
 		let endpoint = target.endpoint;
@@ -52,8 +52,7 @@ impl Adapter for DeepSeekAdapter {
 		// 构建请求头
 		let headers = vec![(String::from("Authorization"), format!("Bearer {api_key}"))];
 
-		// 创建 WebClient 并发送请求
-		let web_client = crate::webc::WebClient::default();
+		// 使用传入的 WebClient 发送请求
 		let web_response = web_client
 			.do_get(&url, &headers)
 			.await

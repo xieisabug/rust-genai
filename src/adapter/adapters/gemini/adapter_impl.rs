@@ -61,7 +61,7 @@ impl Adapter for GeminiAdapter {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 
-	async fn all_models(kind: AdapterKind, target: ServiceTarget) -> Result<Vec<Model>> {
+	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
 		// 使用 API 获取模型列表，如果失败则回退到硬编码列表
 		let auth = target.auth;
 		let endpoint = target.endpoint;
@@ -78,8 +78,7 @@ impl Adapter for GeminiAdapter {
 		// 构建请求头 - Gemini 使用 x-goog-api-key 头部
 		let headers = vec![(String::from("x-goog-api-key"), api_key)];
 
-		// 创建 WebClient 并发送请求
-		let web_client = crate::webc::WebClient::default();
+		// 使用传入的 WebClient 发送请求
 		let web_response = web_client
 			.do_get(&url, &headers)
 			.await

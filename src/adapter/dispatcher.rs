@@ -16,7 +16,7 @@ use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse};
 use crate::embed::{EmbedOptionsSet, EmbedRequest, EmbedResponse};
 use crate::resolver::{AuthData, Endpoint};
-use crate::webc::WebResponse;
+use crate::webc::{WebClient, WebResponse};
 use crate::{Error, Model, ModelIden};
 use crate::{Result, ServiceTarget};
 use reqwest::RequestBuilder;
@@ -86,22 +86,22 @@ impl AdapterDispatcher {
 		}
 	}
 
-	pub async fn all_models(kind: AdapterKind, target: ServiceTarget) -> Result<Vec<Model>> {
+	pub async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &WebClient) -> Result<Vec<Model>> {
 		match kind {
-			AdapterKind::OpenAI => OpenAIAdapter::all_models(kind, target).await,
-			AdapterKind::OpenAIResp => OpenAIRespAdapter::all_models(kind, target).await,
-			AdapterKind::Anthropic => AnthropicAdapter::all_models(kind, target).await,
-			AdapterKind::Cohere => CohereAdapter::all_models(kind, target).await,
-			AdapterKind::Ollama => OllamaAdapter::all_models(kind, target).await,
-			AdapterKind::Gemini => GeminiAdapter::all_models(kind, target).await,
-			AdapterKind::Groq => GroqAdapter::all_models(kind, target).await,
-			AdapterKind::Nebius => NebiusAdapter::all_models(kind, target).await,
-			AdapterKind::Xai => XaiAdapter::all_models(kind, target).await,
-			AdapterKind::DeepSeek => DeepSeekAdapter::all_models(kind, target).await,
-			AdapterKind::Zai => ZaiAdapter::all_models(kind, target).await,
-			AdapterKind::Copilot => CopilotAdapter::all_models(kind, target).await,
-			AdapterKind::Fireworks => FireworksAdapter::all_models(kind, target).await,
-			AdapterKind::Together => TogetherAdapter::all_models(kind, target).await,
+			AdapterKind::OpenAI => OpenAIAdapter::all_models(kind, target, web_client).await,
+			AdapterKind::OpenAIResp => OpenAIRespAdapter::all_models(kind, target, web_client).await,
+			AdapterKind::Anthropic => AnthropicAdapter::all_models(kind, target, web_client).await,
+			AdapterKind::Cohere => CohereAdapter::all_models(kind, target, web_client).await,
+			AdapterKind::Ollama => OllamaAdapter::all_models(kind, target, web_client).await,
+			AdapterKind::Gemini => GeminiAdapter::all_models(kind, target, web_client).await,
+			AdapterKind::Groq => GroqAdapter::all_models(kind, target, web_client).await,
+			AdapterKind::Nebius => NebiusAdapter::all_models(kind, target, web_client).await,
+			AdapterKind::Xai => XaiAdapter::all_models(kind, target, web_client).await,
+			AdapterKind::DeepSeek => DeepSeekAdapter::all_models(kind, target, web_client).await,
+			AdapterKind::Zai => ZaiAdapter::all_models(kind, target, web_client).await,
+			AdapterKind::Copilot => CopilotAdapter::all_models(kind, target, web_client).await,
+			AdapterKind::Fireworks => FireworksAdapter::all_models(kind, target, web_client).await,
+			AdapterKind::Together => TogetherAdapter::all_models(kind, target, web_client).await,
 		}
 	}
 

@@ -48,7 +48,7 @@ impl Adapter for XaiAdapter {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 
-	async fn all_models(kind: AdapterKind, target: ServiceTarget) -> Result<Vec<Model>> {
+	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
 		// 使用 API 获取模型列表，如果失败则回退到硬编码列表
 		let auth = target.auth;
 		let endpoint = target.endpoint;
@@ -65,8 +65,7 @@ impl Adapter for XaiAdapter {
 		// 构建请求头 - xAI 使用与 OpenAI 相同的 Bearer token 格式
 		let headers = vec![("Authorization".to_string(), format!("Bearer {api_key}"))];
 
-		// 创建 WebClient 并发送请求
-		let web_client = crate::webc::WebClient::default();
+		// 使用传入的 WebClient 发送请求
 		let web_response = web_client
 			.do_get(&url, &headers)
 			.await

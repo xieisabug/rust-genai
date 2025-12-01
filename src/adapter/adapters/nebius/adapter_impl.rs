@@ -63,7 +63,7 @@ impl Adapter for NebiusAdapter {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 
-	async fn all_models(_kind: AdapterKind, _target: ServiceTarget) -> Result<Vec<Model>> {
+	async fn all_models(_kind: AdapterKind, _target: ServiceTarget, _web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
 		// 为 Nebius 模型创建基本的模型信息
 		let mut models = Vec::new();
 		

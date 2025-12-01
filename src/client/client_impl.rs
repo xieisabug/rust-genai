@@ -27,7 +27,7 @@ impl Client {
 
 	pub async fn all_models(&self, adapter_kind: AdapterKind) -> Result<Vec<Model>> {
 		let target = self.config().resolve_service_target_without_model(adapter_kind).await?;
-		let models = AdapterDispatcher::all_models(adapter_kind, target).await?;
+		let models = AdapterDispatcher::all_models(adapter_kind, target, self.web_client()).await?;
 		Ok(models)
 	}
 
