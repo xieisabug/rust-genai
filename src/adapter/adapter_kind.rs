@@ -43,6 +43,8 @@ pub enum AdapterKind {
 	Zai,
 	/// Cohere today use it's own native protocol but might move to OpenAI Adapter
 	Cohere,
+	/// GitHub Copilot Chat (uses its own protocol with OAuth authentication)
+	Copilot,
 	/// OpenAI shared behavior + some custom. (currently, localhost only, can be customize with ServerTargetResolver).
 	Ollama,
 }
@@ -64,6 +66,7 @@ impl AdapterKind {
 			AdapterKind::DeepSeek => "DeepSeek",
 			AdapterKind::Zai => "Zai",
 			AdapterKind::Cohere => "Cohere",
+			AdapterKind::Copilot => "Copilot",
 			AdapterKind::Ollama => "Ollama",
 		}
 	}
@@ -83,6 +86,7 @@ impl AdapterKind {
 			AdapterKind::DeepSeek => "deepseek",
 			AdapterKind::Zai => "zai",
 			AdapterKind::Cohere => "cohere",
+			AdapterKind::Copilot => "copilot",
 			AdapterKind::Ollama => "ollama",
 		}
 	}
@@ -101,6 +105,7 @@ impl AdapterKind {
 			"deepseek" => Some(AdapterKind::DeepSeek),
 			"zai" => Some(AdapterKind::Zai),
 			"cohere" => Some(AdapterKind::Cohere),
+			"copilot" => Some(AdapterKind::Copilot),
 			"ollama" => Some(AdapterKind::Ollama),
 			_ => None,
 		}
@@ -124,6 +129,7 @@ impl AdapterKind {
 			AdapterKind::DeepSeek => Some(DeepSeekAdapter::API_KEY_DEFAULT_ENV_NAME),
 			AdapterKind::Zai => Some(ZaiAdapter::API_KEY_DEFAULT_ENV_NAME),
 			AdapterKind::Cohere => Some(CohereAdapter::API_KEY_DEFAULT_ENV_NAME),
+			AdapterKind::Copilot => None, // Copilot uses OAuth token from config
 			AdapterKind::Ollama => None,
 		}
 	}
@@ -161,6 +167,8 @@ impl AdapterKind {
 			// Special handling: "zai" namespace should route to ZAI for coding endpoint
 			if ns == "zai" {
 				return Ok(AdapterKind::Zai);
+			} else if ns == "github_copilot" {
+				return Ok(AdapterKind::Copilot);
 			}
 
 			if let Some(adapter) = Self::from_lower_str(ns) {

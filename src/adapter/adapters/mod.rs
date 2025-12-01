@@ -2,6 +2,7 @@ mod support;
 
 pub(super) mod anthropic;
 pub(super) mod cohere;
+pub(super) mod copilot;
 pub(super) mod deepseek;
 pub(super) mod fireworks;
 pub(super) mod gemini;

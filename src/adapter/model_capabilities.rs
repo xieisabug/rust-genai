@@ -140,7 +140,8 @@ impl ModelCapabilities {
 			| AdapterKind::Xai
 			| AdapterKind::Nebius
 			| AdapterKind::Ollama
-			| AdapterKind::Zai => Some(true),
+			| AdapterKind::Zai
+			| AdapterKind::Copilot => Some(true),
 		}
 	}
 
@@ -157,7 +158,8 @@ impl ModelCapabilities {
 			| AdapterKind::Xai
 			| AdapterKind::Nebius
 			| AdapterKind::Ollama
-			| AdapterKind::Zai => Some(true),
+			| AdapterKind::Zai
+			| AdapterKind::Copilot => Some(true),
 		}
 	}
 
@@ -332,6 +334,7 @@ impl ModelCapabilities {
 			AdapterKind::OpenAIResp => Self::openai_specific_token_limits(model_id),
 			AdapterKind::Anthropic => Self::anthropic_token_limits(model_id),
 			AdapterKind::Cohere => Self::cohere_token_limits(model_id),
+			AdapterKind::Copilot => Self::openai_specific_token_limits(model_id),
 			AdapterKind::DeepSeek => Self::deepseek_token_limits(model_id),
 			AdapterKind::Fireworks => Self::openai_specific_token_limits(model_id),
 			AdapterKind::Gemini => Self::gemini_token_limits(model_id),

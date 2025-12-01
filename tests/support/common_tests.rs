@@ -917,6 +917,7 @@ pub async fn common_test_all_models(adapter_kind: AdapterKind, expected_model_na
 
 	// -- Check
 	assert!(!models.is_empty(), "Should have at least one model");
+	println!("Available models: {:?}", models.iter().map(|m| &*m.name).collect::<Vec<_>>());
 
 	// Check that we can find the expected model
 	let found_model = models.iter().find(|model| &*model.name == expected_model_name);
