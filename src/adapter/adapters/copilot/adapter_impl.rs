@@ -226,7 +226,7 @@ impl Adapter for CopilotAdapter {
 
 	fn default_endpoint() -> Endpoint {
 		// The actual endpoint is determined from the API token response
-		Endpoint::from_owned("https://api.githubcopilot.com".to_string())
+		Endpoint::from_owned("https://api.individual.githubcopilot.com".to_string())
 	}
 
 	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
