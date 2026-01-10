@@ -39,6 +39,15 @@ async fn test_chat_stream_capture_content_ok() -> TestResult<()> {
 
 // endregion: --- Chat Stream
 
+// region:    --- Usage Capture
+
+#[tokio::test]
+async fn test_chat_stream_capture_usage_ok() -> TestResult<()> {
+	common_tests::common_test_chat_stream_capture_all_ok(MODEL_NS, None).await
+}
+
+// endregion: --- Usage Capture
+
 // region:    --- Tool Use
 
 #[tokio::test]

@@ -3,7 +3,7 @@
 use super::types::CopilotStreamResponse;
 use crate::adapter::adapters::support::{StreamerCapturedData, StreamerOptions};
 use crate::adapter::inter_stream::{InterStreamEnd, InterStreamEvent};
-use crate::chat::{ChatOptionsSet, ToolCall};
+use crate::chat::{ChatOptionsSet, ToolCall, Usage};
 use crate::{Error, ModelIden, Result};
 use futures::stream::Stream;
 use reqwest_eventsource::{Event, EventSource};
@@ -48,8 +48,13 @@ impl Stream for CopilotStreamer {
 					// Check for [DONE] marker
 					if data.trim() == "[DONE]" {
 						self.done = true;
+						let captured_usage = if self.options.capture_usage {
+							self.captured_data.usage.take()
+						} else {
+							None
+						};
 						let inter_stream_end = InterStreamEnd {
-							captured_usage: None,
+							captured_usage,
 							captured_text_content: self.captured_data.content.take(),
 							captured_reasoning_content: self.captured_data.reasoning_content.take(),
 							captured_tool_calls: self.captured_data.tool_calls.take(),
@@ -67,6 +72,18 @@ impl Stream for CopilotStreamer {
 							)))));
 						}
 					};
+
+					// Capture usage if present in this chunk and capture_usage is enabled
+					if self.options.capture_usage {
+						if let Some(copilot_usage) = stream_response.usage {
+							self.captured_data.usage = Some(Usage {
+								prompt_tokens: Some(copilot_usage.prompt_tokens as i32),
+								completion_tokens: Some(copilot_usage.completion_tokens as i32),
+								total_tokens: Some(copilot_usage.total_tokens as i32),
+								..Default::default()
+							});
+						}
+					}
 
 					// Get the first choice's delta
 					if let Some(choice) = stream_response.choices.first() {
@@ -120,8 +137,13 @@ impl Stream for CopilotStreamer {
 						// If finish_reason is present, send end event
 						if choice.finish_reason.is_some() {
 							self.done = true;
+							let captured_usage = if self.options.capture_usage {
+								self.captured_data.usage.take()
+							} else {
+								None
+							};
 							let inter_stream_end = InterStreamEnd {
-								captured_usage: None,
+								captured_usage,
 								captured_text_content: self.captured_data.content.take(),
 								captured_reasoning_content: self.captured_data.reasoning_content.take(),
 								captured_tool_calls: self.captured_data.tool_calls.take(),
