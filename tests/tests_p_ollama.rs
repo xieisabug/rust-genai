@@ -4,11 +4,12 @@ use crate::support::{TestResult, common_tests};
 use genai::adapter::AdapterKind;
 use genai::resolver::AuthData;
 
+// https://ollama.com/library
 // "gemma3:4b" "phi3:latest" "gpt-oss:20b"
 // NOTE: "gpt-oss:20b" has some issues on json_mode, stop_sequence
-const MODEL: &str = "gemma3:4b"; //
-const MODEL_NS: &str = "ollama::gemma3:4b";
-const MODEL_TOOL: &str = "ollama::qwen3-vl:4b";
+const MODEL: &str = "gemma3:4b"; // Text / Image
+const MODEL_NS: &str = "ollama::gemma3:4b"; // Text / Image
+const MODEL_TOOL: &str = "ollama::qwen3:4b";
 
 // region:    --- Chat
 
