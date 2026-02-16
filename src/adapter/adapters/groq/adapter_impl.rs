@@ -9,35 +9,6 @@ use reqwest::RequestBuilder;
 
 pub struct GroqAdapter;
 
-// ~ newer on top when/if possible
-pub(in crate::adapter) const MODELS: &[&str] = &[
-	"moonshotai/kimi-k2-instruct",
-	"qwen/qwen3-32b",
-	"mistral-saba-24b",
-	"meta-llama/llama-4-scout-17b-16e-instruct",
-	"meta-llama/llama-4-maverick-17b-128e-instruct",
-	"llama-3.3-70b-versatile",
-	"llama-3.2-3b-preview",
-	"llama-3.2-1b-preview",
-	"llama-3.1-405b-reasoning",
-	"llama-3.1-70b-versatile",
-	"llama-3.1-8b-instant",
-	"mixtral-8x7b-32768",
-	"gemma2-9b-it",
-	"gemma-7b-it", // deprecated
-	"llama-3.1-8b-instant",
-	"llama-guard-3-8b",
-	"llama3-70b-8192",
-	// -- preview
-	"deepseek-r1-distill-llama-70b",
-	"llama-3.3-70b-versatile",
-	"llama-3.2-1b-preview",
-	"llama-3.2-3b-preview",
-	"llama-3.2-11b-vision-preview",
-	"llama-3.2-90b-vision-preview",
-	// "whisper-large-v3", // This is not a chat completion model
-];
-
 impl GroqAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "GROQ_API_KEY";
 }
@@ -58,8 +29,8 @@ impl Adapter for GroqAdapter {
 		}
 	}
 
-	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
-		Ok(MODELS.iter().map(|s| s.to_string()).collect())
+	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>> {
+		OpenAIAdapter::list_model_names_for_end_target(kind, Self::default_endpoint(), Self::default_auth()).await
 	}
 
 	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {

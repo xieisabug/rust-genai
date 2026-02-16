@@ -41,10 +41,13 @@ impl Adapter for OllamaAdapter {
 		let url = format!("{base_url}api/tags");
 
 		let web_c = crate::webc::WebClient::default();
-		let mut res = web_c.do_get(&url, &[]).await.map_err(|webc_error| Error::WebAdapterCall {
-			adapter_kind,
-			webc_error,
-		})?;
+		let mut res = web_c
+			.do_get(&url, &Headers::default())
+			.await
+			.map_err(|webc_error| Error::WebAdapterCall {
+				adapter_kind,
+				webc_error,
+			})?;
 
 		let mut models: Vec<String> = Vec::new();
 

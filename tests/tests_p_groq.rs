@@ -79,7 +79,7 @@ async fn test_resolver_auth_ok() -> TestResult<()> {
 
 #[tokio::test]
 async fn test_list_models() -> TestResult<()> {
-	common_tests::common_test_list_models(AdapterKind::Groq, "llama-3.1-70b-versatile").await
+	common_tests::common_test_list_models(AdapterKind::Groq, "llama-3.3-70b-versatile").await
 }
 
 // endregion: --- List

@@ -21,11 +21,6 @@ use reqwest::RequestBuilder;
 /// However, if the model name has a `/`, then it is assumed to be one recognized by the fireworks.ai service.
 pub struct FireworksAdapter;
 
-/// For fireworks, perhaps to many to list.
-/// Might do the top one later.
-/// But model to adapter kind happen if "fireworks is part of the model name
-pub(in crate::adapter) const MODELS: &[&str] = &[];
-
 impl FireworksAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "FIREWORKS_API_KEY";
 }
@@ -45,8 +40,8 @@ impl Adapter for FireworksAdapter {
 		}
 	}
 
-	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
-		Ok(MODELS.iter().map(|s| s.to_string()).collect())
+	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>> {
+		OpenAIAdapter::list_model_names_for_end_target(kind, Self::default_endpoint(), Self::default_auth()).await
 	}
 
 	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {

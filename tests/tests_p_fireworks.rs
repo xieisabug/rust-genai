@@ -1,7 +1,7 @@
 mod support;
 
 use crate::support::{Check, TestResult, common_tests};
-use genai::resolver::AuthData;
+use genai::{adapter::AdapterKind, resolver::AuthData};
 
 // const MODEL: &str = "fireworks::qwen3-coder-480b-a35b-instruct";
 // const MODEL: &str = "fireworks::gpt-oss-120b";
@@ -127,9 +127,9 @@ async fn test_resolver_auth_ok() -> TestResult<()> {
 
 // region:    --- List
 
-// #[tokio::test]
-// async fn test_list_models() -> TestResult<()> {
-// 	//common_tests::common_test_list_models(AdapterKind::Fireworks, "..").await
-// }
+#[tokio::test]
+async fn test_list_models() -> TestResult<()> {
+	common_tests::common_test_list_models(AdapterKind::Fireworks, "accounts/fireworks/models/gpt-oss-120b").await
+}
 
 // endregion: --- List

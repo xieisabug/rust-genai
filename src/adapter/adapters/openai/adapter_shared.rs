@@ -6,7 +6,7 @@ use crate::adapter::{AdapterDispatcher, AdapterKind, ServiceType, WebRequestData
 use crate::chat::{
 	BinarySource, ChatOptionsSet, ChatRequest, ChatResponseFormat, ChatRole, ContentPart, ReasoningEffort, Usage,
 };
-use crate::resolver::Endpoint;
+use crate::resolver::{AuthData, Endpoint};
 use crate::{Error, Headers, Result};
 use crate::{ModelIden, ServiceTarget};
 use serde_json::{Value, json};
@@ -53,13 +53,11 @@ impl OpenAIAdapter {
 		let (_, model_name) = model.model_name.namespace_and_name();
 		let adapter_kind = model.adapter_kind;
 
-		// -- api_key
-		let api_key = get_api_key(auth, &model)?;
-
 		// -- url
 		let url = AdapterDispatcher::get_service_url(&model, service_type, endpoint)?;
 
-		// -- headers
+		// -- api_key / headers
+		let api_key = get_api_key(auth, &model)?;
 		let headers = Headers::from(("Authorization".to_string(), format!("Bearer {api_key}")));
 
 		let stream = matches!(service_type, ServiceType::ChatStream);
@@ -380,6 +378,44 @@ impl OpenAIAdapter {
 		});
 
 		Ok(OpenAIRequestParts { messages, tools })
+	}
+
+	pub(in crate::adapter::adapters) async fn list_model_names_for_end_target(
+		kind: AdapterKind,
+		endpoint: Endpoint,
+		auth: AuthData,
+	) -> Result<Vec<String>> {
+		// -- url
+		let base_url = endpoint.base_url();
+		let url = format!("{base_url}models");
+
+		// -- auth / headers
+		let api_key = auth.single_key_value().ok();
+		let headers = api_key
+			.map(|api_key| Headers::from(("Authorization".to_string(), format!("Bearer {api_key}"))))
+			.unwrap_or_default();
+
+		// -- Exec request
+		let web_c = crate::webc::WebClient::default();
+		let mut res = web_c.do_get(&url, &headers).await.map_err(|webc_error| Error::WebAdapterCall {
+			adapter_kind: kind,
+			webc_error,
+		})?;
+
+		// -- Format result
+		let mut models: Vec<String> = Vec::new();
+
+		if let Value::Array(models_value) = res.body.x_take("data")? {
+			for mut model in models_value {
+				let model_name: String = model.x_take("id")?;
+				models.push(model_name);
+			}
+		} else {
+			// TODO: Need to add tracing
+			// error!("OllamaAdapter::list_models did not have any models {res:?}");
+		}
+
+		Ok(models)
 	}
 }
 

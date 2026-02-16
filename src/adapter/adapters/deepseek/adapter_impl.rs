@@ -9,8 +9,6 @@ use reqwest::RequestBuilder;
 
 pub struct DeepSeekAdapter;
 
-pub(in crate::adapter) const MODELS: &[&str] = &["deepseek-chat", "deepseek-reasoner"];
-
 impl DeepSeekAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "DEEPSEEK_API_KEY";
 }
@@ -31,8 +29,8 @@ impl Adapter for DeepSeekAdapter {
 		Endpoint::from_static(BASE_URL)
 	}
 
-	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
-		Ok(MODELS.iter().map(|s| s.to_string()).collect())
+	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>> {
+		OpenAIAdapter::list_model_names_for_end_target(kind, Self::default_endpoint(), Self::default_auth()).await
 	}
 
 	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {

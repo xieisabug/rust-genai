@@ -915,7 +915,7 @@ pub async fn common_test_chat_multi_binary_b64_ok(model: &str) -> TestResult<()>
 	]));
 	chat_req = chat_req.append_message(ChatMessage::user(
 		"
-Can you tell me what those images and files are about. 
+Can you tell me what those images and files are about.
 	",
 	));
 

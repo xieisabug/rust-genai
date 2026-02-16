@@ -6,11 +6,11 @@ use crate::adapter::aliyun::AliyunAdapter;
 use crate::adapter::anthropic::AnthropicAdapter;
 use crate::adapter::bigmodel::BigModelAdapter;
 use crate::adapter::cohere::CohereAdapter;
-use crate::adapter::deepseek::{self, DeepSeekAdapter};
+use crate::adapter::deepseek::DeepSeekAdapter;
 use crate::adapter::fireworks::FireworksAdapter;
 use crate::adapter::gemini::GeminiAdapter;
-use crate::adapter::groq::{self, GroqAdapter};
-use crate::adapter::mimo::{self, MimoAdapter};
+use crate::adapter::groq::GroqAdapter;
+use crate::adapter::mimo::MimoAdapter;
 use crate::adapter::nebius::NebiusAdapter;
 use crate::adapter::openai::OpenAIAdapter;
 use crate::adapter::xai::XaiAdapter;
@@ -178,6 +178,9 @@ impl AdapterKind {
 	///
 	/// Note: At this point, this will never fail as the fallback is the Ollama adapter.
 	///       This might change in the future, hence the Result return type.
+	///
+	/// IMPORTANT: Since v0.6.0, Groq and Deepseek models needs to be namespaced e.g., `groq::_model_name_`
+	//             (because now, list_names are dynamic, so, automatic mapping can only be done base on clear model "prefixes")
 	pub fn from_model(model: &str) -> Result<Self> {
 		// -- First check if namespaced
 		if let Some(adapter) = Self::from_model_namespace(model) {
@@ -205,18 +208,16 @@ impl AdapterKind {
 			Ok(Self::Anthropic)
 		} else if model.contains("fireworks") {
 			Ok(Self::Fireworks)
-		} else if groq::MODELS.contains(&model) {
-			Ok(Self::Groq)
-		} else if mimo::MODELS.contains(&model) {
+		} else if model.starts_with("mimo-") {
 			Ok(Self::Mimo)
 		} else if model.starts_with("command") || model.starts_with("embed-") {
 			Ok(Self::Cohere)
-		} else if deepseek::MODELS.contains(&model) {
-			Ok(Self::DeepSeek)
 		} else if model.starts_with("grok") {
 			Ok(Self::Xai)
 		} else if model.starts_with("glm") {
 			Ok(Self::Zai)
+		} else if model.starts_with("deepseek-chat") || model.starts_with("deepseek-reasoner") {
+			Ok(Self::DeepSeek)
 		}
 		// For now, fallback to Ollama
 		else {

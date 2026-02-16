@@ -32,7 +32,7 @@ impl WebClient {
 // region:    --- Web Method Implementation
 
 impl WebClient {
-	pub async fn do_get(&self, url: &str, headers: &[(String, String)]) -> Result<WebResponse> {
+	pub async fn do_get(&self, url: &str, headers: &Headers) -> Result<WebResponse> {
 		let mut reqwest_builder = self.reqwest_client.request(Method::GET, url);
 
 		for (k, v) in headers.iter() {

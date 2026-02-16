@@ -153,6 +153,7 @@ async fn test_resolver_auth_ok() -> TestResult<()> {
 
 // region:    --- List
 
+// NOTE: 2026-02-15 - returns empty array
 // #[tokio::test]
 // #[serial(together)]
 // async fn test_list_models() -> TestResult<()> {

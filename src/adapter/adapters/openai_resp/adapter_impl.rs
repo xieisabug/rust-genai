@@ -1,4 +1,5 @@
 use crate::adapter::adapters::support::get_api_key;
+use crate::adapter::openai::OpenAIAdapter;
 use crate::adapter::openai_resp::OpenAIRespStreamer;
 use crate::adapter::openai_resp::resp_types::RespResponse;
 use crate::adapter::{Adapter, AdapterDispatcher, AdapterKind, ServiceType, WebRequestData};
@@ -15,16 +16,6 @@ use serde_json::{Map, Value, json};
 use value_ext::JsonValueExt;
 
 pub struct OpenAIRespAdapter;
-
-// Latest models
-const MODELS: &[&str] = &[
-	//
-	"gpt-5-pro",
-	"gpt-5-codex",
-	"gpt-5.1-codex",
-	"gpt-5.1-codex-mini",
-	"gpt-5.2-codex",
-];
 
 impl OpenAIRespAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "OPENAI_API_KEY";
@@ -46,8 +37,14 @@ impl Adapter for OpenAIRespAdapter {
 	}
 
 	/// Note: Currently returns the common models (see above)
-	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
-		Ok(MODELS.iter().map(|s| s.to_string()).collect())
+	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>> {
+		//
+		OpenAIAdapter::list_model_names_for_end_target(
+			kind,
+			OpenAIAdapter::default_endpoint(),
+			OpenAIAdapter::default_auth(),
+		)
+		.await
 	}
 
 	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
