@@ -15,15 +15,6 @@ use value_ext::JsonValueExt;
 
 pub struct GeminiAdapter;
 
-// Note: Those model names are just informative, as the Gemini AdapterKind is selected on `startsWith("gemini")`
-const MODELS: &[&str] = &[
-	//
-	"gemini-3-pro-preview",
-	"gemini-2.5-pro",
-	"gemini-2.5-flash",
-	"gemini-2.5-flash-lite",
-];
-
 // Per gemini doc (https://x.com/jeremychone/status/1916501987371438372)
 const REASONING_ZERO: u32 = 0;
 const REASONING_LOW: u32 = 1000;
@@ -73,9 +64,40 @@ impl Adapter for GeminiAdapter {
 		}
 	}
 
-	/// Note: For now, this returns the common models (see above)
-	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
-		Ok(MODELS.iter().map(|s| s.to_string()).collect())
+	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>> {
+		let endpoint = Self::default_endpoint();
+		let auth = Self::default_auth();
+
+		// -- url
+		let base_url = endpoint.base_url();
+		let url = format!("{base_url}models");
+
+		// -- auth / headers
+		let api_key = auth.single_key_value().ok();
+		let headers = api_key
+			.map(|api_key| Headers::from(("x-goog-api-key".to_string(), api_key)))
+			.unwrap_or_default();
+
+		// -- Exec request
+		let web_c = crate::webc::WebClient::default();
+		let mut res = web_c.do_get(&url, &headers).await.map_err(|webc_error| Error::WebAdapterCall {
+			adapter_kind: kind,
+			webc_error,
+		})?;
+
+		// -- Format result
+		let mut models: Vec<String> = Vec::new();
+
+		if let Value::Array(models_value) = res.body.x_take("models")? {
+			for mut model in models_value {
+				let model_name: String = model.x_take("name")?;
+				// Gemini model names are usually prefixed with "models/"
+				let model_name = model_name.strip_prefix("models/").unwrap_or(&model_name).to_string();
+				models.push(model_name);
+			}
+		}
+
+		Ok(models)
 	}
 
 	/// NOTE: As Google Gemini has decided to put their API_KEY in the URL,
