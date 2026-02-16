@@ -59,10 +59,54 @@ const MAX_TOKENS_8K: u32 = 8192; // claude-3-5-sonnet, claude-3-5-haiku
 const MAX_TOKENS_4K: u32 = 4096; // claude-3-opus, claude-3-haiku
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
-const MODELS: &[&str] = &["claude-opus-4-5", "claude-sonnet-4-5", "claude-haiku-4-5"];
 
 impl AnthropicAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "ANTHROPIC_API_KEY";
+
+	pub(in crate::adapter::adapters) async fn list_model_names_for_end_target(
+		kind: AdapterKind,
+		endpoint: Endpoint,
+		auth: AuthData,
+	) -> Result<Vec<String>> {
+		// -- url
+		let base_url = endpoint.base_url();
+		let url = format!("{base_url}models");
+
+		// -- auth / headers
+		let api_key = auth.single_key_value().ok();
+		let headers = api_key
+			.map(|api_key| {
+				Headers::from(vec![
+					("x-api-key".to_string(), api_key),
+					("anthropic-version".to_string(), ANTHROPIC_VERSION.to_string()),
+				])
+			})
+			.unwrap_or_default();
+
+		// -- Exec request
+		let web_c = crate::webc::WebClient::default();
+		let mut res = web_c
+			.do_get(&url, &headers)
+			.await
+			.map_err(|webc_error| crate::Error::WebAdapterCall {
+				adapter_kind: kind,
+				webc_error,
+			})?;
+
+		// -- Format result
+		let mut models: Vec<String> = Vec::new();
+
+		println!("->> {}", res.body.x_pretty()?);
+
+		if let Value::Array(models_value) = res.body.x_take("data")? {
+			for mut model in models_value {
+				let model_name: String = model.x_take("id")?;
+				models.push(model_name);
+			}
+		}
+
+		Ok(models)
+	}
 }
 
 impl Adapter for AnthropicAdapter {
@@ -80,9 +124,8 @@ impl Adapter for AnthropicAdapter {
 		}
 	}
 
-	/// Note: For now, it returns the common models (see above)
-	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
-		Ok(MODELS.iter().map(|s| s.to_string()).collect())
+	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>> {
+		Self::list_model_names_for_end_target(kind, Self::default_endpoint(), Self::default_auth()).await
 	}
 
 	fn get_service_url(_model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
