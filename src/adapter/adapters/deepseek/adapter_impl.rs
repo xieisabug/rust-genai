@@ -14,16 +14,19 @@ use crate::adapter::ModelCapabilities;
 
 pub struct DeepSeekAdapter;
 
-pub(in crate::adapter) const MODELS: &[&str] = &["deepseek-chat", "deepseek-reasoner"];
-
 impl DeepSeekAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "DEEPSEEK_API_KEY";
 }
 
 // The DeepSeek API adapter is modeled after the OpenAI adapter, as the DeepSeek API is compatible with the OpenAI API.
 impl Adapter for DeepSeekAdapter {
+	const DEFAULT_API_KEY_ENV_NAME: Option<&'static str> = Some(Self::API_KEY_DEFAULT_ENV_NAME);
+
 	fn default_auth() -> AuthData {
-		AuthData::from_env(Self::API_KEY_DEFAULT_ENV_NAME)
+		match Self::DEFAULT_API_KEY_ENV_NAME {
+			Some(env_name) => AuthData::from_env(env_name),
+			None => AuthData::None,
+		}
 	}
 
 	fn default_endpoint() -> Endpoint {
@@ -31,8 +34,8 @@ impl Adapter for DeepSeekAdapter {
 		Endpoint::from_static(BASE_URL)
 	}
 
-	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
-		Ok(MODELS.iter().map(|s| s.to_string()).collect())
+	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>> {
+		OpenAIAdapter::list_model_names_for_end_target(kind, Self::default_endpoint(), Self::default_auth()).await
 	}
 
 	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {

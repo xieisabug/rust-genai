@@ -2,15 +2,15 @@ use crate::adapter::adapters::support::get_api_key;
 use crate::adapter::anthropic::AnthropicStreamer;
 use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{
-	Binary, BinarySource, ChatOptionsSet, ChatRequest, ChatResponse, ChatRole, ChatStream, ChatStreamResponse,
-	ContentPart, MessageContent, PromptTokensDetails, ReasoningEffort, ToolCall, Usage,
+	Binary, BinarySource, CacheControl, CacheCreationDetails, ChatOptionsSet, ChatRequest, ChatResponse, ChatRole,
+	ChatStream, ChatStreamResponse, ContentPart, MessageContent, PromptTokensDetails, ReasoningEffort, Tool, ToolCall,
+	ToolConfig, ToolName, Usage,
 };
 use crate::resolver::{AuthData, Endpoint};
-use crate::webc::WebResponse;
-use crate::{Headers, ModelIden, Error};
+use crate::webc::{EventSourceStream, WebResponse};
+use crate::{Error, Headers, ModelIden};
 use crate::{Result, ServiceTarget};
 use reqwest::RequestBuilder;
-use reqwest_eventsource::EventSource;
 use serde_json::{Value, json};
 use tracing::warn;
 use value_ext::JsonValueExt;
@@ -22,6 +22,27 @@ pub struct AnthropicAdapter;
 const REASONING_LOW: u32 = 1024;
 const REASONING_MEDIUM: u32 = 8000;
 const REASONING_HIGH: u32 = 24000;
+
+fn insert_anthropic_thinking_budget_value(payload: &mut Value, effort: &ReasoningEffort) -> Result<()> {
+	let thinking_budget = match effort {
+		ReasoningEffort::None => None,
+		ReasoningEffort::Budget(budget) => Some(*budget),
+		ReasoningEffort::Low | ReasoningEffort::Minimal => Some(REASONING_LOW),
+		ReasoningEffort::Medium => Some(REASONING_MEDIUM),
+		ReasoningEffort::High => Some(REASONING_HIGH),
+	};
+
+	if let Some(thinking_budget) = thinking_budget {
+		payload.x_insert(
+			"thinking",
+			json!({
+				"type": "enabled",
+				"budget_tokens": thinking_budget
+			}),
+		)?;
+	}
+	Ok(())
+}
 
 // NOTE: For Anthropic, the max_tokens must be specified.
 //       To avoid surprises, the default value for genai is the maximum for a given model.
@@ -36,25 +57,67 @@ const REASONING_HIGH: u32 = 24000;
 // For max model tokens see: https://docs.anthropic.com/en/docs/about-claude/models/overview
 //
 // fall back
-const MAX_TOKENS_64K: u32 = 64000; // claude-3-7-sonnet, claude-sonnet-4.x, claude-haiku-4-5
+const MAX_TOKENS_64K: u32 = 64000; // claude-opus-4-5 claude-sonnet... (4 and above), claude-haiku..., claude-3-7-sonnet,
 // custom
 const MAX_TOKENS_32K: u32 = 32000; // claude-opus-4
 const MAX_TOKENS_8K: u32 = 8192; // claude-3-5-sonnet, claude-3-5-haiku
 const MAX_TOKENS_4K: u32 = 4096; // claude-3-opus, claude-3-haiku
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
-const MODELS: &[&str] = &[
-	"claude-opus-4-1-20250805",
-	"claude-sonnet-4-5-20250929",
-	"claude-haiku-4-5-20251001",
-];
 
 impl AnthropicAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "ANTHROPIC_API_KEY";
 	pub const BASE_URL_DEFAULT_ENV_NAME: &str = "ANTHROPIC_BASE_URL";
+
+	pub(in crate::adapter::adapters) async fn list_model_names_for_end_target(
+		kind: AdapterKind,
+		endpoint: Endpoint,
+		auth: AuthData,
+	) -> Result<Vec<String>> {
+		// -- url
+		let base_url = endpoint.base_url();
+		let url = format!("{base_url}models");
+
+		// -- auth / headers
+		let api_key = auth.single_key_value().ok();
+		let headers = api_key
+			.map(|api_key| {
+				Headers::from(vec![
+					("x-api-key".to_string(), api_key),
+					("anthropic-version".to_string(), ANTHROPIC_VERSION.to_string()),
+				])
+			})
+			.unwrap_or_default();
+
+		// -- Exec request
+		let web_c = crate::webc::WebClient::default();
+		let mut res = web_c
+			.do_get(&url, &headers)
+			.await
+			.map_err(|webc_error| crate::Error::WebAdapterCall {
+				adapter_kind: kind,
+				webc_error,
+			})?;
+
+		// -- Format result
+		let mut models: Vec<String> = Vec::new();
+
+		println!("->> {}", res.body.x_pretty()?);
+
+		if let Value::Array(models_value) = res.body.x_take("data")? {
+			for mut model in models_value {
+				let model_name: String = model.x_take("id")?;
+				models.push(model_name);
+			}
+		}
+
+		Ok(models)
+	}
 }
 
 impl Adapter for AnthropicAdapter {
+	const DEFAULT_API_KEY_ENV_NAME: Option<&'static str> = Some(Self::API_KEY_DEFAULT_ENV_NAME);
+
 	fn default_endpoint() -> Endpoint {
 		const BASE_URL: &str = "https://api.anthropic.com/v1/";
 		let mut base_url = std::env::var(Self::BASE_URL_DEFAULT_ENV_NAME).unwrap_or_else(|_| BASE_URL.to_string());
@@ -68,12 +131,14 @@ impl Adapter for AnthropicAdapter {
 	}
 
 	fn default_auth() -> AuthData {
-		AuthData::from_env(Self::API_KEY_DEFAULT_ENV_NAME)
+		match Self::DEFAULT_API_KEY_ENV_NAME {
+			Some(env_name) => AuthData::from_env(env_name),
+			None => AuthData::None,
+		}
 	}
 
-	/// Note: For now, it returns the common models (see above)
-	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
-		Ok(MODELS.iter().map(|s| s.to_string()).collect())
+	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>> {
+		Self::list_model_names_for_end_target(kind, Self::default_endpoint(), Self::default_auth()).await
 	}
 
 	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
@@ -182,6 +247,7 @@ impl Adapter for AnthropicAdapter {
 		let headers = Headers::from(vec![
 			// headers
 			("x-api-key".to_string(), api_key),
+			("anthropic-beta".to_string(), "effort-2025-11-24".to_string()),
 			("anthropic-version".to_string(), ANTHROPIC_VERSION.to_string()),
 		]);
 
@@ -193,40 +259,33 @@ impl Adapter for AnthropicAdapter {
 		} = Self::into_anthropic_request_parts(chat_req)?;
 
 		// -- Extract Model Name and Reasoning
-		let (raw_model_name, _) = model.model_name.as_model_name_and_namespace();
+		let (_, raw_model_name) = model.model_name.namespace_and_name();
 
-		let (model_name, thinking_budget) = match (raw_model_name, options_set.reasoning_effort()) {
+		// -- Reasoning Budget
+		let (model_name, computed_reasoning_effort) = match (raw_model_name, options_set.reasoning_effort()) {
 			// No explicity reasoning_effor, try to infer from model name suffix (supports -zero)
 			(model, None) => {
 				// let model_name: &str = &model.model_name;
 				if let Some((prefix, last)) = raw_model_name.rsplit_once('-') {
 					let reasoning = match last {
-						"zero" => None,    // That will disable thinking
-						"minimal" => None, // That will disable thinking
-						"low" => Some(REASONING_LOW),
-						"medium" => Some(REASONING_MEDIUM),
-						"high" => Some(REASONING_HIGH),
+						"zero" => None,
+						"None" => Some(ReasoningEffort::Low),
+						"minimal" => Some(ReasoningEffort::Low),
+						"low" => Some(ReasoningEffort::Low),
+						"medium" => Some(ReasoningEffort::Medium),
+						"high" => Some(ReasoningEffort::High),
 						_ => None,
 					};
 					// create the model name if there was a `-..` reasoning suffix
 					let model = if reasoning.is_some() { prefix } else { model };
+
 					(model, reasoning)
 				} else {
 					(model, None)
 				}
 			}
 			// If reasoning effort, turn the low, medium, budget ones into Budget
-			(model, Some(effort)) => {
-				let effort = match effort {
-					// -- When minimal, same a zeror
-					ReasoningEffort::Minimal => None,
-					ReasoningEffort::Low => Some(REASONING_LOW),
-					ReasoningEffort::Medium => Some(REASONING_MEDIUM),
-					ReasoningEffort::High => Some(REASONING_HIGH),
-					ReasoningEffort::Budget(budget) => Some(*budget),
-				};
-				(model, effort)
-			}
+			(model, Some(effort)) => (model, Some(effort.clone())),
 		};
 
 		// -- Build the basic payload
@@ -246,14 +305,38 @@ impl Adapter for AnthropicAdapter {
 		}
 
 		// -- Set the reasoning effort
-		if let Some(budget) = thinking_budget {
-			payload.x_insert(
-				"thinking",
-				json!({
-					"type": "enabled",
-					"budget_tokens": budget
-				}),
-			)?;
+		if let Some(computed_reasoning_effort) = computed_reasoning_effort {
+			// DOC: https://platform.claude.com/docs/en/build-with-claude/effort
+			// - Effort parameter: Controls how Claude spends all tokens—including thinking tokens, text responses, and tool calls
+			// - Thinking token budget: Sets a maximum limit on thinking tokens specifically
+			// For best performance on complex reasoning tasks, use high effort (the default) with a high thinking token budget.
+			// This allows Claude to think thoroughly and provide comprehensive responses.
+
+			// In short, should use both thinking budget and effort
+
+			// -- if opus-4-5 then, we set the anthropic effort
+			if model_name.contains("opus-4-5") {
+				let effort = match computed_reasoning_effort {
+					ReasoningEffort::Minimal => "low",
+					ReasoningEffort::Low => "low",
+					ReasoningEffort::Medium => "medium",
+					ReasoningEffort::High => "high",
+					// -- for now, will not set
+					ReasoningEffort::Budget(_) => "",
+					ReasoningEffort::None => "",
+				};
+				if !effort.is_empty() {
+					payload.x_insert(
+						"output_config",
+						json!({
+							"effort": effort
+						}),
+					)?;
+				}
+			}
+
+			// -- All models, including opus-4-5, we see the thinking budget
+			insert_anthropic_thinking_budget_value(&mut payload, &computed_reasoning_effort)?;
 		}
 
 		// -- Add supported ChatOptions
@@ -265,8 +348,7 @@ impl Adapter for AnthropicAdapter {
 			payload.x_insert("stop_sequences", options_set.stop_sequences())?;
 		}
 
-		//const MAX_TOKENS_64K: u32 = 64000; // claude-sonnet-4, claude-3-7-sonnet,
-		// custom
+		// const MAX_TOKENS_64K: u32 = 64000; // claude-opus-4-5 claude-sonnet-4, claude-3-7-sonnet,
 		// const MAX_TOKENS_32K: u32 = 32000; // claude-opus-4
 		// const MAX_TOKENS_8K: u32 = 8192; // claude-3-5-sonnet, claude-3-5-haiku
 		// const MAX_TOKENS_4K: u32 = 4096; // claude-3-opus, claude-3-haiku
@@ -275,6 +357,7 @@ impl Adapter for AnthropicAdapter {
 			if model_name.contains("claude-sonnet")
 				|| model_name.contains("claude-haiku")
 				|| model_name.contains("claude-3-7-sonnet")
+				|| model_name.contains("claude-opus-4-5")
 			{
 				MAX_TOKENS_64K
 			} else if model_name.contains("claude-opus-4") {
@@ -301,11 +384,9 @@ impl Adapter for AnthropicAdapter {
 	fn to_chat_response(
 		model_iden: ModelIden,
 		web_response: WebResponse,
-		options_set: ChatOptionsSet<'_, '_>,
+		_options_set: ChatOptionsSet<'_, '_>,
 	) -> Result<ChatResponse> {
 		let WebResponse { mut body, .. } = web_response;
-
-		let captured_raw_body = options_set.capture_raw_body().unwrap_or_default().then(|| body.clone());
 
 		// -- Capture the provider_model_iden
 		// TODO: Need to be implemented (if available), for now, just clone model_iden
@@ -314,6 +395,7 @@ impl Adapter for AnthropicAdapter {
 
 		// -- Capture the usage
 		let usage = body.x_take::<Value>("usage");
+
 		let usage = usage.map(Self::into_usage).unwrap_or_default();
 
 		// -- Capture the content
@@ -327,8 +409,8 @@ impl Adapter for AnthropicAdapter {
 		let mut reasoning_content: Vec<String> = Vec::new();
 
 		for mut item in json_content_items {
-			let typ: &str = item.x_get_as("type")?;
-			match typ {
+			let typ: String = item.x_take("type")?;
+			match typ.as_ref() {
 				"text" => {
 					let part = ContentPart::from_text(item.x_take::<String>("text")?);
 					content.push(part);
@@ -343,12 +425,17 @@ impl Adapter for AnthropicAdapter {
 						call_id,
 						fn_name,
 						fn_arguments,
+						thought_signatures: None,
 					};
 
 					let part = ContentPart::ToolCall(tool_call);
 					content.push(part);
 				}
-				_ => (),
+				other_typ => {
+					// insert it back
+					item.x_insert("type", other_typ)?;
+					content.push(ContentPart::from_custom(model_iden.clone(), item))
+				}
 			}
 		}
 
@@ -364,7 +451,7 @@ impl Adapter for AnthropicAdapter {
 			model_iden,
 			provider_model_iden,
 			usage,
-			captured_raw_body,
+			captured_raw_body: None, // Set by the client exec_chat
 		})
 	}
 
@@ -373,7 +460,7 @@ impl Adapter for AnthropicAdapter {
 		reqwest_builder: RequestBuilder,
 		options_set: ChatOptionsSet<'_, '_>,
 	) -> Result<ChatStreamResponse> {
-		let event_source = EventSource::new(reqwest_builder)?;
+		let event_source = EventSourceStream::new(reqwest_builder);
 		let anthropic_stream = AnthropicStreamer::new(event_source, model_iden.clone(), options_set);
 		let chat_stream = ChatStream::from_inter_stream(anthropic_stream);
 		Ok(ChatStreamResponse {
@@ -455,6 +542,9 @@ impl AnthropicAdapter {
 		let cache_read_input_tokens: i32 = usage_value.x_take("cache_read_input_tokens").unwrap_or(0);
 		let completion_tokens: i32 = usage_value.x_take("output_tokens").ok().unwrap_or(0);
 
+		// Parse cache_creation breakdown if present (TTL-specific breakdown)
+		let cache_creation_details = usage_value.get("cache_creation").and_then(parse_cache_creation_details);
+
 		// compute the prompt_tokens
 		let prompt_tokens = input_tokens + cache_creation_input_tokens + cache_read_input_tokens;
 
@@ -463,15 +553,17 @@ impl AnthropicAdapter {
 
 		// For now the logic is to have a Some of PromptTokensDetails if at least one of those value is not 0
 		// TODO: Needs to be normalized across adapters.
-		let prompt_tokens_details = if cache_creation_input_tokens > 0 || cache_read_input_tokens > 0 {
-			Some(PromptTokensDetails {
-				cache_creation_tokens: Some(cache_creation_input_tokens),
-				cached_tokens: Some(cache_read_input_tokens),
-				audio_tokens: None,
-			})
-		} else {
-			None
-		};
+		let prompt_tokens_details =
+			if cache_creation_input_tokens > 0 || cache_read_input_tokens > 0 || cache_creation_details.is_some() {
+				Some(PromptTokensDetails {
+					cache_creation_tokens: Some(cache_creation_input_tokens),
+					cache_creation_details,
+					cached_tokens: Some(cache_read_input_tokens),
+					audio_tokens: None,
+				})
+			} else {
+				None
+			};
 
 		Usage {
 			prompt_tokens: Some(prompt_tokens),
@@ -489,24 +581,45 @@ impl AnthropicAdapter {
 	/// - Will push the `ChatRequest.system` and system message to `AnthropicRequestParts.system`
 	fn into_anthropic_request_parts(chat_req: ChatRequest) -> Result<AnthropicRequestParts> {
 		let mut messages: Vec<Value> = Vec::new();
-		// (content, is_cache_control)
-		let mut systems: Vec<(String, bool)> = Vec::new();
+		// (content, cache_control)
+		let mut systems: Vec<(String, Option<CacheControl>)> = Vec::new();
+
+		// Track TTL ordering for validation (1h must come before 5m)
+		let mut seen_5m_cache = false;
 
 		// NOTE: For now, this means the first System cannot have a cache control
 		//       so that we do not change too much.
 		if let Some(system) = chat_req.system {
-			systems.push((system, false));
+			systems.push((system, None));
 		}
 
 		// -- Process the messages
 		for msg in chat_req.messages {
-			let is_cache_control = msg.options.map(|o| o.cache_control.is_some()).unwrap_or(false);
+			let cache_control = msg.options.and_then(|o| o.cache_control);
+
+			// Check TTL ordering constraint
+			if let Some(ref cc) = cache_control {
+				match cc {
+					CacheControl::Ephemeral | CacheControl::Ephemeral5m => {
+						seen_5m_cache = true;
+					}
+					CacheControl::Ephemeral1h => {
+						if seen_5m_cache {
+							warn!(
+								"Anthropic cache TTL ordering violation: Ephemeral1h appears after Ephemeral/Ephemeral5m. \
+								1-hour cache entries must appear before 5-minute cache entries. \
+								See: https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#mixing-different-ttls"
+							);
+						}
+					}
+				}
+			}
 
 			match msg.role {
 				// Collect only text for system; other content parts are ignored by Anthropic here.
 				ChatRole::System => {
 					if let Some(system_text) = msg.content.joined_texts() {
-						systems.push((system_text, is_cache_control));
+						systems.push((system_text, cache_control));
 					}
 				}
 
@@ -514,7 +627,7 @@ impl AnthropicAdapter {
 				ChatRole::User => {
 					if msg.content.is_text_only() {
 						let text = msg.content.joined_texts().unwrap_or_else(String::new);
-						let content = apply_cache_control_to_text(is_cache_control, text);
+						let content = apply_cache_control_to_text(cache_control.as_ref(), text);
 						messages.push(json!({"role": "user", "content": content}));
 					} else {
 						let mut values: Vec<Value> = Vec::new();
@@ -581,9 +694,12 @@ impl AnthropicAdapter {
 										"tool_use_id": tool_response.call_id,
 									}));
 								}
+								ContentPart::ThoughtSignature(_) => {}
+								// Custom are ignored for this logic
+								ContentPart::Custom(_) => {}
 							}
 						}
-						let values = apply_cache_control_to_parts(is_cache_control, values);
+						let values = apply_cache_control_to_parts(cache_control.as_ref(), values);
 						messages.push(json!({"role": "user", "content": values}));
 					}
 				}
@@ -613,10 +729,13 @@ impl AnthropicAdapter {
 							// Unsupported for assistant role in Anthropic message content
 							ContentPart::Binary(_) => {}
 							ContentPart::ToolResponse(_) => {}
+							ContentPart::ThoughtSignature(_) => {}
+							// Custom are ignored for this logic
+							ContentPart::Custom(_) => {}
 						}
 					}
 
-					if !has_tool_use && has_text && !is_cache_control && values.len() == 1 {
+					if !has_tool_use && has_text && cache_control.is_none() && values.len() == 1 {
 						// Optimize to simple string when it's only one text part and no cache control.
 						let text = values
 							.first()
@@ -624,10 +743,10 @@ impl AnthropicAdapter {
 							.and_then(|v| v.as_str())
 							.unwrap_or_default()
 							.to_string();
-						let content = apply_cache_control_to_text(false, text);
+						let content = apply_cache_control_to_text(None, text);
 						messages.push(json!({"role": "assistant", "content": content}));
 					} else {
-						let values = apply_cache_control_to_parts(is_cache_control, values);
+						let values = apply_cache_control_to_parts(cache_control.as_ref(), values);
 						messages.push(json!({"role": "assistant", "content": values}));
 					}
 				}
@@ -645,7 +764,7 @@ impl AnthropicAdapter {
 						}
 					}
 					if !values.is_empty() {
-						let values = apply_cache_control_to_parts(is_cache_control, values);
+						let values = apply_cache_control_to_parts(cache_control.as_ref(), values);
 						messages.push(json!({"role": "user", "content": values}));
 					}
 				}
@@ -655,26 +774,19 @@ impl AnthropicAdapter {
 		// -- Create the Anthropic system
 		// NOTE: Anthropic does not have a "role": "system", just a single optional system property
 		let system = if !systems.is_empty() {
-			let mut last_cache_idx = -1;
-			// first determine the last cache control index
-			for (idx, (_, is_cache_control)) in systems.iter().enumerate() {
-				if *is_cache_control {
-					last_cache_idx = idx as i32;
-				}
-			}
-			// Now build the system multi part
-			let system: Value = if last_cache_idx > 0 {
-				let mut parts: Vec<Value> = Vec::new();
-				for (idx, (content, _)) in systems.iter().enumerate() {
-					let idx = idx as i32;
-					if idx == last_cache_idx {
-						let part = json!({"type": "text", "text": content, "cache_control": {"type": "ephemeral"}});
-						parts.push(part);
-					} else {
-						let part = json!({"type": "text", "text": content});
-						parts.push(part);
-					}
-				}
+			let has_any_cache = systems.iter().any(|(_, cc)| cc.is_some());
+			let system: Value = if has_any_cache {
+				// Build multi-part system with per-part cache_control
+				let parts: Vec<Value> = systems
+					.iter()
+					.map(|(content, cc)| {
+						if let Some(cc) = cc {
+							json!({"type": "text", "text": content, "cache_control": cache_control_to_json(cc)})
+						} else {
+							json!({"type": "text", "text": content})
+						}
+					})
+					.collect();
 				json!(parts)
 			} else {
 				let content_buff = systems.iter().map(|(content, _)| content.as_str()).collect::<Vec<&str>>();
@@ -688,26 +800,16 @@ impl AnthropicAdapter {
 		};
 
 		// -- Process the tools
-		let tools = chat_req.tools.map(|tools| {
-			tools
-				.into_iter()
-				.map(|tool| {
-					// TODO: Need to handle the error correctly
-					// TODO: Needs to have a custom serializer (tool should not have to match to a provider)
-					// NOTE: Right now, low probability, so we just return null if cannot convert to value.
-					let mut tool_value = json!({
-						"name": tool.name,
-						"input_schema": tool.schema,
-					});
 
-					if let Some(description) = tool.description {
-						// TODO: need to handle error
-						let _ = tool_value.x_insert("description", description);
-					}
-					tool_value
-				})
-				.collect::<Vec<Value>>()
-		});
+		let tools: Option<Vec<Value>> = chat_req
+			.tools
+			.map(|tools| {
+				tools
+					.into_iter()
+					.map(Self::tool_to_anthropic_tool)
+					.collect::<Result<Vec<Value>>>()
+			})
+			.transpose()?;
 
 		Ok(AnthropicRequestParts {
 			system,
@@ -715,12 +817,116 @@ impl AnthropicAdapter {
 			tools,
 		})
 	}
+
+	fn tool_to_anthropic_tool(tool: Tool) -> Result<Value> {
+		let Tool {
+			name,
+			description,
+			schema,
+			config,
+		} = tool;
+
+		let name = match name {
+			ToolName::WebSearch => "web_search".to_string(),
+			ToolName::Custom(name) => name,
+		};
+
+		let mut tool_value = json!({"name": name});
+
+		// -- Add type for builtin tool
+		#[allow(clippy::single_match)] // will have more
+		match name.as_str() {
+			"web_search" => {
+				tool_value.x_insert("type", "web_search_20250305")?;
+			}
+			_ => (),
+		}
+
+		// NOTE: Fo now, if tool_value.type then, assume bultin and set config as propertie
+		if tool_value.get("type").is_some() {
+			if let Some(config) = config {
+				match config {
+					ToolConfig::WebSearch(config) => {
+						if let Some(max_uses) = config.max_uses {
+							let _ = tool_value.x_insert("max_uses", max_uses);
+						}
+						if let Some(allowed_domains) = config.allowed_domains {
+							let _ = tool_value.x_insert("allowed_domains", allowed_domains);
+						}
+						if let Some(blocked_domains) = config.blocked_domains {
+							let _ = tool_value.x_insert("blocked_domains", blocked_domains);
+						}
+					}
+					// if custom, we assume we flatten the config properties since we are in a builtin
+					ToolConfig::Custom(config) => {
+						// NOTE: For now, ignore if not object
+						tool_value.x_merge(config)?;
+					}
+				}
+			}
+		} else {
+			tool_value.x_insert("input_schema", schema)?;
+			if let Some(description) = description {
+				// TODO: need to handle error
+				let _ = tool_value.x_insert("description", description);
+			}
+		}
+
+		Ok(tool_value)
+	}
+}
+
+/// Convert CacheControl to Anthropic JSON format.
+///
+/// See: https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching#1-hour-cache-duration
+fn cache_control_to_json(cache_control: &CacheControl) -> Value {
+	match cache_control {
+		CacheControl::Ephemeral => {
+			json!({"type": "ephemeral"})
+		}
+		CacheControl::Ephemeral5m => {
+			json!({"type": "ephemeral", "ttl": "5m"})
+		}
+		CacheControl::Ephemeral1h => {
+			json!({"type": "ephemeral", "ttl": "1h"})
+		}
+	}
+}
+
+/// Parse cache_creation breakdown from Anthropic API response.
+///
+/// The API returns TTL-specific token counts in the `cache_creation` object:
+/// ```json
+/// "cache_creation": {
+///     "ephemeral_5m_input_tokens": 456,
+///     "ephemeral_1h_input_tokens": 100
+/// }
+/// ```
+pub(super) fn parse_cache_creation_details(cache_creation: &Value) -> Option<CacheCreationDetails> {
+	let ephemeral_5m_tokens = cache_creation
+		.get("ephemeral_5m_input_tokens")
+		.and_then(|v| v.as_i64())
+		.map(|v| v as i32);
+	let ephemeral_1h_tokens = cache_creation
+		.get("ephemeral_1h_input_tokens")
+		.and_then(|v| v.as_i64())
+		.map(|v| v as i32);
+
+	// Only return Some if at least one TTL has tokens
+	if ephemeral_5m_tokens.is_some() || ephemeral_1h_tokens.is_some() {
+		Some(CacheCreationDetails {
+			ephemeral_5m_tokens,
+			ephemeral_1h_tokens,
+		})
+	} else {
+		None
+	}
 }
 
 /// Apply the cache control logic to a text content
-fn apply_cache_control_to_text(is_cache_control: bool, content: String) -> Value {
-	if is_cache_control {
-		let value = json!({"type": "text", "text": content, "cache_control": {"type": "ephemeral"}});
+fn apply_cache_control_to_text(cache_control: Option<&CacheControl>, content: String) -> Value {
+	if let Some(cc) = cache_control {
+		let value = json!({"type": "text", "text": content, "cache_control": cache_control_to_json(cc)});
 		json!(vec![value])
 	}
 	// simple return
@@ -730,13 +936,15 @@ fn apply_cache_control_to_text(is_cache_control: bool, content: String) -> Value
 }
 
 /// Apply the cache control logic to a text content
-fn apply_cache_control_to_parts(is_cache_control: bool, parts: Vec<Value>) -> Vec<Value> {
+fn apply_cache_control_to_parts(cache_control: Option<&CacheControl>, parts: Vec<Value>) -> Vec<Value> {
 	let mut parts = parts;
-	if is_cache_control && !parts.is_empty() {
+	if let Some(cc) = cache_control
+		&& !parts.is_empty()
+	{
 		let len = parts.len();
 		if let Some(last_value) = parts.get_mut(len - 1) {
 			// NOTE: For now, if it fails, then, no cache
-			let _ = last_value.x_insert("cache_control", json!( {"type": "ephemeral"}));
+			let _ = last_value.x_insert("cache_control", cache_control_to_json(cc));
 			// TODO: Should warn
 		}
 	}
@@ -750,3 +958,74 @@ struct AnthropicRequestParts {
 }
 
 // endregion: --- Support
+
+// region:    --- Tests
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_cache_control_to_json_ephemeral() {
+		let result = cache_control_to_json(&CacheControl::Ephemeral);
+		assert_eq!(result, json!({"type": "ephemeral"}));
+	}
+
+	#[test]
+	fn test_cache_control_to_json_ephemeral_5m() {
+		let result = cache_control_to_json(&CacheControl::Ephemeral5m);
+		assert_eq!(result, json!({"type": "ephemeral", "ttl": "5m"}));
+	}
+
+	#[test]
+	fn test_cache_control_to_json_ephemeral_1h() {
+		let result = cache_control_to_json(&CacheControl::Ephemeral1h);
+		assert_eq!(result, json!({"type": "ephemeral", "ttl": "1h"}));
+	}
+
+	#[test]
+	fn test_parse_cache_creation_details_with_both_ttls() {
+		let cache_creation = json!({
+			"ephemeral_5m_input_tokens": 456,
+			"ephemeral_1h_input_tokens": 100
+		});
+		let result = parse_cache_creation_details(&cache_creation);
+		assert!(result.is_some());
+		let details = result.unwrap();
+		assert_eq!(details.ephemeral_5m_tokens, Some(456));
+		assert_eq!(details.ephemeral_1h_tokens, Some(100));
+	}
+
+	#[test]
+	fn test_parse_cache_creation_details_with_5m_only() {
+		let cache_creation = json!({
+			"ephemeral_5m_input_tokens": 456
+		});
+		let result = parse_cache_creation_details(&cache_creation);
+		assert!(result.is_some());
+		let details = result.unwrap();
+		assert_eq!(details.ephemeral_5m_tokens, Some(456));
+		assert_eq!(details.ephemeral_1h_tokens, None);
+	}
+
+	#[test]
+	fn test_parse_cache_creation_details_with_1h_only() {
+		let cache_creation = json!({
+			"ephemeral_1h_input_tokens": 100
+		});
+		let result = parse_cache_creation_details(&cache_creation);
+		assert!(result.is_some());
+		let details = result.unwrap();
+		assert_eq!(details.ephemeral_5m_tokens, None);
+		assert_eq!(details.ephemeral_1h_tokens, Some(100));
+	}
+
+	#[test]
+	fn test_parse_cache_creation_details_empty() {
+		let cache_creation = json!({});
+		let result = parse_cache_creation_details(&cache_creation);
+		assert!(result.is_none());
+	}
+}
+
+// endregion: --- Tests

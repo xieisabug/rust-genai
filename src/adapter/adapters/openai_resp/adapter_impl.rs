@@ -1,36 +1,35 @@
 use crate::adapter::adapters::support::get_api_key;
-use crate::adapter::openai::OpenAIStreamer;
+use crate::adapter::openai::OpenAIAdapter;
+use crate::adapter::openai_resp::OpenAIRespStreamer;
 use crate::adapter::openai_resp::resp_types::RespResponse;
 use crate::adapter::{Adapter, AdapterDispatcher, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{
 	ChatOptionsSet, ChatRequest, ChatResponse, ChatResponseFormat, ChatRole, ChatStream, ChatStreamResponse,
-	ContentPart, MessageContent, ReasoningEffort, Usage,
+	ContentPart, MessageContent, ReasoningEffort, Tool, ToolConfig, ToolName, Usage,
 };
 use crate::resolver::{AuthData, Endpoint};
-use crate::webc::WebResponse;
+use crate::webc::{EventSourceStream, WebResponse};
 use crate::{Error, Headers, Result};
 use crate::{Model, ModelIden, ServiceTarget};
 use crate::adapter::ModelCapabilities;
 use reqwest::RequestBuilder;
-use reqwest_eventsource::EventSource;
 use serde_json::{Map, Value, json};
 use value_ext::JsonValueExt;
 
 pub struct OpenAIRespAdapter;
-
-// Latest models
-const MODELS: &[&str] = &[
-	//
-	"gpt-5-codex",
-];
 
 impl OpenAIRespAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "OPENAI_API_KEY";
 }
 
 impl Adapter for OpenAIRespAdapter {
+	const DEFAULT_API_KEY_ENV_NAME: Option<&'static str> = Some(Self::API_KEY_DEFAULT_ENV_NAME);
+
 	fn default_auth() -> AuthData {
-		AuthData::from_env(Self::API_KEY_DEFAULT_ENV_NAME)
+		match Self::DEFAULT_API_KEY_ENV_NAME {
+			Some(env_name) => AuthData::from_env(env_name),
+			None => AuthData::None,
+		}
 	}
 
 	fn default_endpoint() -> Endpoint {
@@ -39,8 +38,14 @@ impl Adapter for OpenAIRespAdapter {
 	}
 
 	/// Note: Currently returns the common models (see above)
-	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
-		Ok(MODELS.iter().map(|s| s.to_string()).collect())
+	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>> {
+		//
+		OpenAIAdapter::list_model_names_for_end_target(
+			kind,
+			OpenAIAdapter::default_endpoint(),
+			OpenAIAdapter::default_auth(),
+		)
+		.await
 	}
 
 	async fn all_models(kind: AdapterKind, _target: ServiceTarget, _web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
@@ -91,7 +96,7 @@ impl Adapter for OpenAIRespAdapter {
 		chat_options: ChatOptionsSet<'_, '_>,
 	) -> Result<WebRequestData> {
 		let ServiceTarget { model, auth, endpoint } = target;
-		let (model_name, _) = model.model_name.as_model_name_and_namespace();
+		let (_, model_name) = model.model_name.namespace_and_name();
 		let adapter_kind = model.adapter_kind;
 
 		// -- api_key
@@ -101,21 +106,9 @@ impl Adapter for OpenAIRespAdapter {
 		let url = AdapterDispatcher::get_service_url(&model, service_type, endpoint)?;
 
 		// -- headers
-		let mut headers = Headers::from(("Authorization".to_string(), format!("Bearer {api_key}")));
+		let headers = Headers::from(("Authorization".to_string(), format!("Bearer {api_key}")));
 
-		// -- extra headers
-		if let Some(extra_headers) = chat_options.extra_headers() {
-			headers.merge_with(extra_headers);
-		}
-
-		// -- for new v1/responses/ for now do not support stream
 		let stream = matches!(service_type, ServiceType::ChatStream);
-		if stream {
-			return Err(Error::AdapterNotSupported {
-				adapter_kind,
-				feature: "stream".into(),
-			});
-		}
 
 		// -- compute reasoning_effort and eventual trimmed model_name
 		// For now, just for openai AdapterKind
@@ -142,7 +135,8 @@ impl Adapter for OpenAIRespAdapter {
 		let mut payload = json!({
 			"store": false,
 			"model": model_name,
-			"input": messages
+			"input": messages,
+			"stream": stream,
 		});
 
 		// -- Set reasoning effort
@@ -207,10 +201,6 @@ impl Adapter for OpenAIRespAdapter {
 		}
 
 		// -- Add supported ChatOptions
-		if stream & chat_options.capture_usage().unwrap_or(false) {
-			payload.x_insert("stream_options", json!({"include_usage": true}))?;
-		}
-
 		if let Some(temperature) = chat_options.temperature() {
 			payload.x_insert("temperature", temperature)?;
 		}
@@ -274,8 +264,8 @@ impl Adapter for OpenAIRespAdapter {
 		reqwest_builder: RequestBuilder,
 		options_sets: ChatOptionsSet<'_, '_>,
 	) -> Result<ChatStreamResponse> {
-		let event_source = EventSource::new(reqwest_builder)?;
-		let openai_stream = OpenAIStreamer::new(event_source, model_iden.clone(), options_sets);
+		let event_source = EventSourceStream::new(reqwest_builder);
+		let openai_stream = OpenAIRespStreamer::new(event_source, model_iden.clone(), options_sets);
 		let chat_stream = ChatStream::from_inter_stream(openai_stream);
 
 		Ok(ChatStreamResponse {
@@ -425,6 +415,9 @@ impl OpenAIRespAdapter {
 								// TODO: Probably need to warn if it is a ToolCalls type of content
 								ContentPart::ToolCall(_) => (),
 								ContentPart::ToolResponse(_) => (),
+								ContentPart::ThoughtSignature(_) => (),
+								// Custom are ignored for this logic
+								ContentPart::Custom(_) => {}
 							}
 						}
 						input_items.push(json! ({"role": "user", "content": values}));
@@ -441,7 +434,7 @@ impl OpenAIRespAdapter {
 						match part {
 							ContentPart::Text(text) => {
 								item_message_content.push(json!({
-										"type": "input_text",
+										"type": "output_text",
 										"text": text
 								}));
 							}
@@ -465,8 +458,11 @@ impl OpenAIRespAdapter {
 							}
 
 							// TODO: Probably need towarn on this one (probably need to add binary here)
-							ContentPart::Binary(_) => (),
-							ContentPart::ToolResponse(_) => (),
+							ContentPart::Binary(_) => {}
+							ContentPart::ToolResponse(_) => {}
+							ContentPart::ThoughtSignature(_) => {}
+							// Custom are ignored for this logic
+							ContentPart::Custom(_) => {}
 						}
 					}
 
@@ -498,30 +494,60 @@ impl OpenAIRespAdapter {
 		}
 
 		// -- Process the tools
-		let tools = chat_req.tools.map(|tools| {
-			tools
-				.into_iter()
-				.map(|tool| {
-					// TODO: Need to handle the error correctly
-					// TODO: Needs to have a custom serializer (tool should not have to match to a provider)
-					// NOTE: Right now, low probability, so, we just return null if cannot convert to value.
-					json!({
-						"type": "function",
-						"name": tool.name,
-						"description": tool.description,
-						"parameters": tool.schema,
-						// TODO: If we need to support `strict: true` we need to add additionalProperties: false into the schema
-						//       above (like structured output)
-						"strict": false,
-					})
-				})
-				.collect::<Vec<Value>>()
-		});
+		let tools = chat_req
+			.tools
+			.map(|tools| tools.into_iter().map(Self::tool_to_openai_tool).collect::<Result<Vec<Value>>>())
+			.transpose()?;
 
 		Ok(OpenAIRespRequestParts { input_items, tools })
 	}
-}
 
+	fn tool_to_openai_tool(tool: Tool) -> Result<Value> {
+		let Tool {
+			name,
+			description,
+			schema,
+			config,
+		} = tool;
+
+		let name = match name {
+			ToolName::WebSearch => "web_search".to_string(),
+			ToolName::Custom(name) => name,
+		};
+
+		let tool_value = match name.as_ref() {
+			"web_search" => {
+				let mut tool_value = json!({"type": "web_search"});
+				match config {
+					Some(ToolConfig::WebSearch(_ws_config)) => {
+						// FIXME: Implement what is posible in filters
+					}
+					Some(ToolConfig::Custom(config_value)) => {
+						// IMPORTANT: Here like anthropic, we merge it on top of the toll value
+						//            (and not as value of "name" as this would not fit that api)
+						//            Gemini does a `{name: config}` which fit that API
+						tool_value.x_merge(config_value)?;
+					}
+					None => (),
+				};
+				tool_value
+			}
+			name => {
+				json!({
+					"type": "function",
+					"name": name,
+					"description": description,
+					"parameters": schema,
+					// TODO: If we need to support `strict: true` we need to add additionalProperties: false into the schema
+					//       above (like structured output)
+					"strict": false,
+				})
+			}
+		};
+
+		Ok(tool_value)
+	}
+}
 // region:    --- Support
 
 struct OpenAIRespRequestParts {
@@ -530,3 +556,63 @@ struct OpenAIRespRequestParts {
 }
 
 // endregion: --- Support
+
+// region:    --- Tests
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::adapter::AdapterKind;
+	use crate::chat::ChatMessage;
+
+	/// Test that assistant message text content uses "output_text" type (not "input_text").
+	///
+	/// This is required by OpenAI's Responses API - assistant content is model output,
+	/// so it must use "output_text". Using "input_text" causes:
+	/// "Invalid value: 'input_text'. Supported values are: 'output_text' and 'refusal'."
+	#[test]
+	fn test_assistant_message_uses_output_text_content_type() {
+		let model_iden = ModelIden::new(AdapterKind::OpenAIResp, "gpt-5-codex");
+
+		// Create a chat request with an assistant message
+		let chat_req = ChatRequest::default()
+			.with_system("You are a helpful assistant.")
+			.append_message(ChatMessage::user("What's the weather?"))
+			.append_message(ChatMessage::assistant("The weather is sunny."));
+
+		// Serialize to OpenAI Responses API format
+		let parts =
+			OpenAIRespAdapter::into_openai_request_parts(&model_iden, chat_req).expect("Should serialize successfully");
+
+		// Find the assistant message in input_items
+		let assistant_msg = parts
+			.input_items
+			.iter()
+			.find(|item| {
+				item.get("type").and_then(|t| t.as_str()) == Some("message")
+					&& item.get("role").and_then(|r| r.as_str()) == Some("assistant")
+			})
+			.expect("Should have an assistant message");
+
+		// Check the content uses "output_text" type
+		let content = assistant_msg
+			.get("content")
+			.and_then(|c| c.as_array())
+			.expect("Assistant message should have content array");
+
+		assert!(!content.is_empty(), "Content should not be empty");
+
+		let first_content = &content[0];
+		let content_type = first_content
+			.get("type")
+			.and_then(|t| t.as_str())
+			.expect("Content should have a type");
+
+		assert_eq!(
+			content_type, "output_text",
+			"Assistant message content should use 'output_text' type, not 'input_text'"
+		);
+	}
+}
+
+// endregion: --- Tests

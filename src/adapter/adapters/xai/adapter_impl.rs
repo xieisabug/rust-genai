@@ -28,24 +28,28 @@ pub(in crate::adapter) const MODELS: &[&str] = &[
 	// Note: Excluding image generation models (grok-2-image-1212) as they're not chat completion models
 	// Note: Beta models (grok-3-beta, grok-3-mini-beta) not in official list - removed
 ];
-
 impl XaiAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "XAI_API_KEY";
 }
 
 // The Groq API adapter is modeled after the OpenAI adapter, as the Groq API is compatible with the OpenAI API.
 impl Adapter for XaiAdapter {
+	const DEFAULT_API_KEY_ENV_NAME: Option<&'static str> = Some(Self::API_KEY_DEFAULT_ENV_NAME);
+
 	fn default_endpoint() -> Endpoint {
 		const BASE_URL: &str = "https://api.x.ai/v1/";
 		Endpoint::from_static(BASE_URL)
 	}
 
 	fn default_auth() -> AuthData {
-		AuthData::from_env(Self::API_KEY_DEFAULT_ENV_NAME)
+		match Self::DEFAULT_API_KEY_ENV_NAME {
+			Some(env_name) => AuthData::from_env(env_name),
+			None => AuthData::None,
+		}
 	}
 
-	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
-		Ok(MODELS.iter().map(|s| s.to_string()).collect())
+	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>> {
+		OpenAIAdapter::list_model_names_for_end_target(kind, Self::default_endpoint(), Self::default_auth()).await
 	}
 
 	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {

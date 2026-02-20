@@ -1,18 +1,23 @@
+use crate::adapter::adapters::ollama::OllamaAdapter;
+use crate::adapter::adapters::openai_resp::OpenAIRespAdapter;
 use crate::adapter::adapters::together::TogetherAdapter;
 use crate::adapter::adapters::zai::ZaiAdapter;
+use crate::adapter::aliyun::AliyunAdapter;
 use crate::adapter::anthropic::AnthropicAdapter;
+use crate::adapter::bigmodel::BigModelAdapter;
 use crate::adapter::cohere::CohereAdapter;
-use crate::adapter::deepseek::{self, DeepSeekAdapter};
+use crate::adapter::deepseek::DeepSeekAdapter;
 use crate::adapter::fireworks::FireworksAdapter;
 use crate::adapter::gemini::GeminiAdapter;
-use crate::adapter::groq::{self, GroqAdapter};
+use crate::adapter::groq::GroqAdapter;
+use crate::adapter::mimo::MimoAdapter;
 use crate::adapter::nebius::NebiusAdapter;
 use crate::adapter::openai::OpenAIAdapter;
 use crate::adapter::xai::XaiAdapter;
+use crate::adapter::{Adapter as _, zai};
 use crate::{ModelName, Result};
 use derive_more::Display;
 use serde::{Deserialize, Serialize};
-use tracing::info;
 
 /// AdapterKind is an enum that represents the different types of adapters that can be used to interact with the API.
 ///
@@ -33,6 +38,8 @@ pub enum AdapterKind {
 	Together,
 	/// Reuse some of the OpenAI adapter behavior, customize some (e.g., normalize thinking budget)
 	Groq,
+	/// For Mimo (Mostly use OpenAI)
+	Mimo,
 	/// For Nebius (Mostly use OpenAI)
 	Nebius,
 	/// For xAI (Mostly use OpenAI)
@@ -41,6 +48,10 @@ pub enum AdapterKind {
 	DeepSeek,
 	/// For ZAI (Mostly use OpenAI)
 	Zai,
+	/// For big model (only accessible via namespace bigmodel::)
+	BigModel,
+	/// For aliyun (Mostly use OpenAI)
+	Aliyun,
 	/// Cohere today use it's own native protocol but might move to OpenAI Adapter
 	Cohere,
 	/// GitHub Copilot Chat (uses its own protocol with OAuth authentication)
@@ -61,10 +72,13 @@ impl AdapterKind {
 			AdapterKind::Fireworks => "Fireworks",
 			AdapterKind::Together => "Together",
 			AdapterKind::Groq => "Groq",
+			AdapterKind::Mimo => "Mimo",
 			AdapterKind::Nebius => "Nebius",
 			AdapterKind::Xai => "xAi",
 			AdapterKind::DeepSeek => "DeepSeek",
 			AdapterKind::Zai => "Zai",
+			AdapterKind::BigModel => "BigModel",
+			AdapterKind::Aliyun => "Aliyun",
 			AdapterKind::Cohere => "Cohere",
 			AdapterKind::Copilot => "Copilot",
 			AdapterKind::Ollama => "Ollama",
@@ -81,10 +95,13 @@ impl AdapterKind {
 			AdapterKind::Fireworks => "fireworks",
 			AdapterKind::Together => "together",
 			AdapterKind::Groq => "groq",
+			AdapterKind::Mimo => "mimo",
 			AdapterKind::Nebius => "nebius",
 			AdapterKind::Xai => "xai",
 			AdapterKind::DeepSeek => "deepseek",
 			AdapterKind::Zai => "zai",
+			AdapterKind::BigModel => "bigmodel",
+			AdapterKind::Aliyun => "aliyun",
 			AdapterKind::Cohere => "cohere",
 			AdapterKind::Copilot => "copilot",
 			AdapterKind::Ollama => "ollama",
@@ -100,10 +117,13 @@ impl AdapterKind {
 			"fireworks" => Some(AdapterKind::Fireworks),
 			"together" => Some(AdapterKind::Together),
 			"groq" => Some(AdapterKind::Groq),
+			"mimo" => Some(AdapterKind::Mimo),
 			"nebius" => Some(AdapterKind::Nebius),
 			"xai" => Some(AdapterKind::Xai),
 			"deepseek" => Some(AdapterKind::DeepSeek),
 			"zai" => Some(AdapterKind::Zai),
+			"bigmodel" => Some(AdapterKind::BigModel),
+			"aliyun" => Some(AdapterKind::Aliyun),
 			"cohere" => Some(AdapterKind::Cohere),
 			"copilot" => Some(AdapterKind::Copilot),
 			"ollama" => Some(AdapterKind::Ollama),
@@ -117,20 +137,23 @@ impl AdapterKind {
 	/// Get the default key environment variable name for the adapter kind.
 	pub fn default_key_env_name(&self) -> Option<&'static str> {
 		match self {
-			AdapterKind::OpenAI => Some(OpenAIAdapter::API_KEY_DEFAULT_ENV_NAME),
-			AdapterKind::OpenAIResp => Some(OpenAIAdapter::API_KEY_DEFAULT_ENV_NAME),
-			AdapterKind::Gemini => Some(GeminiAdapter::API_KEY_DEFAULT_ENV_NAME),
-			AdapterKind::Anthropic => Some(AnthropicAdapter::API_KEY_DEFAULT_ENV_NAME),
-			AdapterKind::Fireworks => Some(FireworksAdapter::API_KEY_DEFAULT_ENV_NAME),
-			AdapterKind::Together => Some(TogetherAdapter::API_KEY_DEFAULT_ENV_NAME),
-			AdapterKind::Groq => Some(GroqAdapter::API_KEY_DEFAULT_ENV_NAME),
-			AdapterKind::Nebius => Some(NebiusAdapter::API_KEY_DEFAULT_ENV_NAME),
-			AdapterKind::Xai => Some(XaiAdapter::API_KEY_DEFAULT_ENV_NAME),
-			AdapterKind::DeepSeek => Some(DeepSeekAdapter::API_KEY_DEFAULT_ENV_NAME),
-			AdapterKind::Zai => Some(ZaiAdapter::API_KEY_DEFAULT_ENV_NAME),
-			AdapterKind::Cohere => Some(CohereAdapter::API_KEY_DEFAULT_ENV_NAME),
-			AdapterKind::Copilot => None, // Copilot uses OAuth token from config
-			AdapterKind::Ollama => None,
+			AdapterKind::OpenAI => OpenAIAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::OpenAIResp => OpenAIRespAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::Gemini => GeminiAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::Anthropic => AnthropicAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::Fireworks => FireworksAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::Together => TogetherAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::Groq => GroqAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::Mimo => MimoAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::Nebius => NebiusAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::Xai => XaiAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::DeepSeek => DeepSeekAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::Zai => ZaiAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::BigModel => BigModelAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::Aliyun => AliyunAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::Cohere => CohereAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::Copilot => None,
+			AdapterKind::Ollama => OllamaAdapter::DEFAULT_API_KEY_ENV_NAME,
 		}
 	}
 }
@@ -161,24 +184,16 @@ impl AdapterKind {
 	///
 	/// Note: At this point, this will never fail as the fallback is the Ollama adapter.
 	///       This might change in the future, hence the Result return type.
+	///
+	/// IMPORTANT: Since v0.6.0, Groq and Deepseek models needs to be namespaced e.g., `groq::_model_name_`
+	//             (because now, list_names are dynamic, so, automatic mapping can only be done base on clear model "prefixes")
 	pub fn from_model(model: &str) -> Result<Self> {
 		// -- First check if namespaced
-		if let (_, Some(ns)) = ModelName::model_name_and_namespace(model) {
-			// Special handling: "zai" namespace should route to ZAI for coding endpoint
-			if ns == "zai" {
-				return Ok(AdapterKind::Zai);
-			} else if ns == "github_copilot" {
-				return Ok(AdapterKind::Copilot);
-			}
-
-			if let Some(adapter) = Self::from_lower_str(ns) {
-				return Ok(adapter);
-			} else {
-				info!("No AdapterKind found for '{ns}'")
-			}
+		if let Some(adapter) = Self::from_model_namespace(model) {
+			return Ok(adapter);
 		}
 
-		// -- Resolve from modelname
+		// -- Otherwise, Resolve from modelname
 		if model.starts_with("o3")
 			|| model.starts_with("o4")
 			|| model.starts_with("o1")
@@ -199,16 +214,16 @@ impl AdapterKind {
 			Ok(Self::Anthropic)
 		} else if model.contains("fireworks") {
 			Ok(Self::Fireworks)
-		} else if groq::MODELS.contains(&model) {
-			Ok(Self::Groq)
+		} else if model.starts_with("mimo-") {
+			Ok(Self::Mimo)
 		} else if model.starts_with("command") || model.starts_with("embed-") {
 			Ok(Self::Cohere)
-		} else if deepseek::MODELS.contains(&model) {
-			Ok(Self::DeepSeek)
 		} else if model.starts_with("grok") {
 			Ok(Self::Xai)
 		} else if model.starts_with("glm") {
 			Ok(Self::Zai)
+		} else if model.starts_with("deepseek-chat") || model.starts_with("deepseek-reasoner") {
+			Ok(Self::DeepSeek)
 		}
 		// For now, fallback to Ollama
 		else {
@@ -216,3 +231,32 @@ impl AdapterKind {
 		}
 	}
 }
+
+// region:    --- Support
+
+/// Inner api to return
+impl AdapterKind {
+	fn from_model_namespace(model: &str) -> Option<Self> {
+		let (namespace, _) = ModelName::split_as_namespace_and_name(model);
+		let namespace = namespace?;
+
+		// -- First, check if simple adapter lower string match
+		if let Some(adapter) = Self::from_lower_str(namespace) {
+			Some(adapter)
+		}
+		// -- Second, custom, for now, we harcode this exceptin here (might become more generic later)
+		else if namespace == "github_copilot" {
+			Some(Self::Copilot)
+		}
+		else if namespace == zai::ZAI_CODING_NAMESPACE {
+			Some(Self::Zai)
+		}
+		//
+		// -- Otherwise, no adapter from namespace, because no matching namespace
+		else {
+			None
+		}
+	}
+}
+
+// endregion: --- Support

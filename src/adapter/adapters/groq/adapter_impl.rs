@@ -41,27 +41,31 @@ pub(in crate::adapter) const MODELS: &[&str] = &[
 	"llama3-70b-8192",                 // Legacy Llama 3 70B
 	"llama-guard-3-8b",                // Legacy Llama Guard 3
 	"gemma-7b-it",                     // Legacy Gemma 7B (deprecated)
-	
+
 	// Note: Excluded audio models (whisper, playai-tts) as they're not chat completion models
 ];
-
 impl GroqAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "GROQ_API_KEY";
 }
 
 // The Groq API adapter is modeled after the OpenAI adapter, as the Groq API is compatible with the OpenAI API.
 impl Adapter for GroqAdapter {
+	const DEFAULT_API_KEY_ENV_NAME: Option<&'static str> = Some(Self::API_KEY_DEFAULT_ENV_NAME);
+
 	fn default_endpoint() -> Endpoint {
 		const BASE_URL: &str = "https://api.groq.com/openai/v1/";
 		Endpoint::from_static(BASE_URL)
 	}
 
 	fn default_auth() -> AuthData {
-		AuthData::from_env(Self::API_KEY_DEFAULT_ENV_NAME)
+		match Self::DEFAULT_API_KEY_ENV_NAME {
+			Some(env_name) => AuthData::from_env(env_name),
+			None => AuthData::None,
+		}
 	}
 
-	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
-		Ok(MODELS.iter().map(|s| s.to_string()).collect())
+	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>> {
+		OpenAIAdapter::list_model_names_for_end_target(kind, Self::default_endpoint(), Self::default_auth()).await
 	}
 
 	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {

@@ -2,11 +2,12 @@ mod support;
 
 use crate::support::{Check, TestResult, common_tests};
 use genai::adapter::AdapterKind;
+use genai::chat::ReasoningEffort;
 use genai::resolver::AuthData;
 
 // note: "gpt-4o-mini" has issue when image & pdf
 // as for 2025-08-08 gpt-5-mini does not support temperature & stop sequence
-const MODEL_LATEST: &str = "gpt-5.1";
+const MODEL_LATEST: &str = "gpt-5.2";
 const MODEL_GPT_5_MINI: &str = "gpt-5-mini"; // for the streaming reasoning test
 const AUDIO_MODEL: &str = "gpt-audio-mini";
 const MODEL2: &str = "gpt-4.1-mini"; // for temperature & stop sequence
@@ -39,7 +40,7 @@ async fn test_chat_simple_ok() -> TestResult<()> {
 #[tokio::test]
 async fn test_chat_reasoning_ok() -> TestResult<()> {
 	// For now, do not test Check::REASONING, for OpenAI as it is not captured
-	common_tests::common_test_chat_reasoning_ok(MODEL_LATEST, Some(Check::REASONING_USAGE)).await
+	common_tests::common_test_chat_reasoning_ok(MODEL_LATEST, ReasoningEffort::High, Some(Check::REASONING_USAGE)).await
 }
 
 #[tokio::test]
@@ -127,6 +128,11 @@ async fn test_chat_binary_image_b64_ok() -> TestResult<()> {
 }
 
 #[tokio::test]
+async fn test_chat_binary_image_file_ok() -> TestResult<()> {
+	common_tests::common_test_chat_image_file_ok(MODEL_LATEST).await
+}
+
+#[tokio::test]
 async fn test_chat_binary_audio_b64_ok() -> TestResult<()> {
 	common_tests::common_test_chat_audio_b64_ok(AUDIO_MODEL).await
 }
@@ -169,7 +175,7 @@ async fn test_resolver_auth_ok() -> TestResult<()> {
 
 #[tokio::test]
 async fn test_list_models() -> TestResult<()> {
-	common_tests::common_test_list_models(AdapterKind::OpenAI, "gpt-5-mini").await
+	common_tests::common_test_list_models(AdapterKind::OpenAI, "gpt-5.2-codex").await
 }
 
 // when run this test, you need to set the OPENAI_API_KEY environment variables

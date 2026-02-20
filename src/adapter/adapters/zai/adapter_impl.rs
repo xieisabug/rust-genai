@@ -8,6 +8,8 @@ use crate::{Model, ModelIden, ModelName};
 use crate::{Result, ServiceTarget};
 use reqwest::RequestBuilder;
 
+pub const ZAI_CODING_NAMESPACE: &str = "zai-coding";
+
 /// Helper structure to hold ZAI model parsing information
 struct ZaiModelEndpoint {
 	endpoint: Endpoint,
@@ -16,11 +18,11 @@ struct ZaiModelEndpoint {
 impl ZaiModelEndpoint {
 	/// Parse ModelIden to determine if it's a coding model and return endpoint
 	fn from_model(model: &ModelIden) -> Self {
-		let (_, namespace) = model.model_name.as_model_name_and_namespace();
+		let (namespace, _) = model.model_name.namespace_and_name();
 
 		// Check if namespace is "zai" to route to coding endpoint
 		let endpoint = match namespace {
-			Some("zai") => Endpoint::from_static("https://api.z.ai/api/coding/paas/v4/"),
+			Some(ZAI_CODING_NAMESPACE) => Endpoint::from_static("https://api.z.ai/api/coding/paas/v4/"),
 			_ => ZaiAdapter::default_endpoint(),
 		};
 
@@ -77,17 +79,22 @@ impl ZaiAdapter {
 
 // The ZAI API is mostly compatible with the OpenAI API.
 impl Adapter for ZaiAdapter {
+	const DEFAULT_API_KEY_ENV_NAME: Option<&'static str> = Some(Self::API_KEY_DEFAULT_ENV_NAME);
+
 	fn default_endpoint() -> Endpoint {
 		const BASE_URL: &str = "https://api.z.ai/api/paas/v4/";
 		Endpoint::from_static(BASE_URL)
 	}
 
 	fn default_auth() -> AuthData {
-		AuthData::from_env(Self::API_KEY_DEFAULT_ENV_NAME)
+		match Self::DEFAULT_API_KEY_ENV_NAME {
+			Some(env_name) => AuthData::from_env(env_name),
+			None => AuthData::None,
+		}
 	}
 
-	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
-		Ok(MODELS.iter().map(|s| s.to_string()).collect())
+	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>> {
+		OpenAIAdapter::list_model_names_for_end_target(kind, Self::default_endpoint(), Self::default_auth()).await
 	}
 
 	async fn all_models(_kind: AdapterKind, _target: ServiceTarget, _web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {

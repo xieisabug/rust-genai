@@ -1,59 +1,64 @@
-# Specification Guidelines
+# Specification Rules
 
-This document defines the rules for creating and maintaining specification files.
+This document defines the rules for creating and maintaining module/layer specification files (e.g., `spec-adapter.md`, `spec-tool.md`).
 
-Important formatting rules
+## Formatting Rules
 
 - Use `-` for bullet points. 
 - For numbering bullet point style, have empty lines between numbering line. 
+- Keep specifications concise; avoid restating code that is obvious from type signatures.
+- Use inline code backticks for type names, function names, and file paths.
+- Ensure there is an empty line before and after every code block.
 
+## Specification Structure
 
-## Types of Specification Files
+Each specification file should follow this structure.
 
-### `spec--index.md`
+### 1. Overview
 
-A single file providing a high-level summary of the entire system.
+A short paragraph describing the goal of the module or sub-system.
 
-### `spec-module_name.md`
+- What problem it solves or what responsibility it owns.
+- Where it sits in the overall architecture (e.g., "sits between the client layer and the adapter layer").
 
-A specification file for each individual module.  
-- `module-path-name` represents the module’s hierarchy path, flattened with `-`.  
-- Each file documents the specification for a single module.
+### 2. Code Design Pattern
 
-Make sure that the `module_name` is the top most common just after `src/`
+Describe the high-level design pattern(s) used by this module.
 
-For example `src/module_01/sub_mod/some_file.rs` the spec module name will be `dev/spec/spec-module_01.md`
+- Name the pattern (e.g., trait-based dispatch, builder, strategy, newtype wrapper).
+- Explain how the key pieces relate to each other at a conceptual level.
+- If the module exposes a streaming or async model, state it here.
 
-(module_name is lowercase)
+### 3. Public API
 
-## Required Structure for Module Specification Files
+List the key public types and public functions that are exposed to consumers of this module.
 
-Each `spec-module-path-name.md` file must include the following sections.
+ For each key public type:
 
-<module_spec_template>
+ - Use a `#### `TypeName` - One-line description.` heading.
 
-## module-path-name
+ - Provide a concise Rust code block showing its public properties immediately after the heading. The code block should be on the first column (not indented).
 
-### Goal
+ - Below the code block, use bullet points for design intent (e.g., "newtype over `String` for type safety") or to list important public methods with their roles.
 
-A clear description of the module’s purpose and responsibilities.
+ For functions or simpler types:
 
-### Public Module API
+ - State its name and a one-line purpose in a bullet point or heading as appropriate.
 
-A description of the APIs exposed by the module.  
-- Define what is exported and how it can be consumed by other modules.  
-- Include function signatures, data structures, or endpoints as needed.
+ - Group related items under sub-headings if the module exposes many types.
 
-### Module Parts
+Do not duplicate full signatures; focus on intent and usage patterns.
 
-A breakdown of the module’s internal components.  
-- May reference sub-files or sub-modules.  
-- Should explain how the parts work together.
+### 4. Internal Implementation
 
-### Key Design Considerations
+Describe the internal code design that is not part of the public API.
 
-Key design considerations of this module and of its key parts. 
+- Key internal types, traits, or helper functions and their roles.
+- How data flows through the internal components.
+- Any important invariants, constraints, or conventions that contributors must follow.
+- File organization if there are multiple internal files (e.g., `support.rs`, `streamer.rs`).
 
+### 5. Usage Example
 
+Provide a concise code snippet showing the primary way to use the module.
 
-</module_spec_template>

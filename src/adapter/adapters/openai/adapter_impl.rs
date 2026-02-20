@@ -1,41 +1,22 @@
 use crate::adapter::adapters::support::get_api_key;
 use crate::adapter::model_capabilities::ModelCapabilities;
 use crate::adapter::openai::OpenAIStreamer;
-use crate::adapter::openai::ToWebRequestCustom;
-use crate::adapter::{Adapter, AdapterDispatcher, AdapterKind, ServiceType, WebRequestData};
-use crate::chat::Binary;
+use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{
-	BinarySource, ChatOptionsSet, ChatRequest, ChatResponse, ChatResponseFormat, ChatRole, ChatStream,
-	ChatStreamResponse, ContentPart, MessageContent, ReasoningEffort, ToolCall, Usage,
+	ChatOptionsSet, ChatRequest, ChatResponse, ChatStream, ChatStreamResponse, MessageContent, ToolCall,
 };
 use crate::common::{Modality, ReasoningEffortType};
 use crate::resolver::{AuthData, Endpoint};
-use crate::webc::WebResponse;
-use crate::{Error, Headers, Model, Result};
+use crate::webc::{EventSourceStream, WebResponse};
+use crate::{Error, Model, Result};
 use crate::{ModelIden, ServiceTarget};
 use reqwest::RequestBuilder;
-use reqwest_eventsource::EventSource;
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::Value;
 use std::collections::HashSet;
-use tracing::error;
-use tracing::warn;
 use value_ext::JsonValueExt;
 
 pub struct OpenAIAdapter;
-
-// Latest models
-const MODELS: &[&str] = &[
-	//
-	"gpt-5.1",
-	"gpt-5.1-codex",
-	"gpt-5.1-codex-mini",
-	"gpt-5",
-	"gpt-5-mini",
-	"gpt-5-nano",
-	"gpt-audio-mini",
-	"gpt-audio",
-];
 
 impl OpenAIAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "OPENAI_API_KEY";
@@ -129,8 +110,13 @@ impl OpenAIAdapter {
 }
 
 impl Adapter for OpenAIAdapter {
+	const DEFAULT_API_KEY_ENV_NAME: Option<&'static str> = Some(Self::API_KEY_DEFAULT_ENV_NAME);
+
 	fn default_auth() -> AuthData {
-		AuthData::from_env(Self::API_KEY_DEFAULT_ENV_NAME)
+		match Self::DEFAULT_API_KEY_ENV_NAME {
+			Some(env_name) => AuthData::from_env(env_name),
+			None => AuthData::None,
+		}
 	}
 
 	fn default_endpoint() -> Endpoint {
@@ -146,8 +132,8 @@ impl Adapter for OpenAIAdapter {
 	}
 
 	/// Note: Currently returns the common models (see above)
-	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
-		Ok(MODELS.iter().map(|s| s.to_string()).collect())
+	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>> {
+		OpenAIAdapter::list_model_names_for_end_target(kind, Self::default_endpoint(), Self::default_auth()).await
 	}
 
 	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
@@ -211,8 +197,6 @@ impl Adapter for OpenAIAdapter {
 		options_set: ChatOptionsSet<'_, '_>,
 	) -> Result<ChatResponse> {
 		let WebResponse { mut body, .. } = web_response;
-
-		let captured_raw_body = options_set.capture_raw_body().unwrap_or_default().then(|| body.clone());
 
 		// -- Capture the provider_model_iden
 		let provider_model_name: Option<String> = body.x_remove("model").ok();
@@ -279,7 +263,7 @@ impl Adapter for OpenAIAdapter {
 			model_iden,
 			provider_model_iden,
 			usage,
-			captured_raw_body,
+			captured_raw_body: None, // Set by the client exec_chat
 		})
 	}
 
@@ -288,7 +272,7 @@ impl Adapter for OpenAIAdapter {
 		reqwest_builder: RequestBuilder,
 		options_sets: ChatOptionsSet<'_, '_>,
 	) -> Result<ChatStreamResponse> {
-		let event_source = EventSource::new(reqwest_builder)?;
+		let event_source = EventSourceStream::new(reqwest_builder);
 		let openai_stream = OpenAIStreamer::new(event_source, model_iden.clone(), options_sets);
 		let chat_stream = ChatStream::from_inter_stream(openai_stream);
 
@@ -315,392 +299,7 @@ impl Adapter for OpenAIAdapter {
 	}
 }
 
-/// Support functions for other adapters that share OpenAI APIs
-impl OpenAIAdapter {
-	pub(in crate::adapter::adapters) fn util_get_service_url(
-		_model: &ModelIden,
-		service_type: ServiceType,
-		// -- utility arguments
-		default_endpoint: Endpoint,
-	) -> Result<String> {
-		let base_url = default_endpoint.base_url();
-		// Parse into URL and query-params
-		let base_url = reqwest::Url::parse(base_url)
-			.map_err(|err| Error::Internal(format!("Cannot parse url: {base_url}. Cause:\n{err}")))?;
-		let original_query_params = base_url.query().to_owned();
 
-		let suffix = match service_type {
-			ServiceType::Chat | ServiceType::ChatStream => "chat/completions",
-			ServiceType::Embed => "embeddings",
-			ServiceType::Models => "models",
-		};
-		let mut full_url = base_url.join(suffix).map_err(|err| {
-			Error::Internal(format!(
-				"Cannot joing suffix '{suffix}' for url: {base_url}. Cause:\n{err}"
-			))
-		})?;
-		full_url.set_query(original_query_params);
-		Ok(full_url.to_string())
-	}
-
-	/// Shared OpenAI to_web_request_data for various OpenAI compatible adapters
-	pub(in crate::adapter::adapters) fn util_to_web_request_data(
-		target: ServiceTarget,
-		service_type: ServiceType,
-		chat_req: ChatRequest,
-		options_set: ChatOptionsSet<'_, '_>,
-		custom: Option<ToWebRequestCustom>,
-	) -> Result<WebRequestData> {
-		let ServiceTarget { model, auth, endpoint } = target;
-		let (model_name, _) = model.model_name.as_model_name_and_namespace();
-		let adapter_kind = model.adapter_kind;
-
-		// -- api_key
-		let api_key = get_api_key(auth, &model)?;
-
-		// -- url
-		let url = AdapterDispatcher::get_service_url(&model, service_type, endpoint)?;
-
-		// -- headers
-		let mut headers = Headers::from(("Authorization".to_string(), format!("Bearer {api_key}")));
-
-		// -- extra headers
-		if let Some(extra_headers) = options_set.extra_headers() {
-			headers.merge_with(extra_headers);
-		}
-
-		let stream = matches!(service_type, ServiceType::ChatStream);
-
-		// -- compute reasoning_effort and eventual trimmed model_name
-		// For now, just for openai AdapterKind
-		let (reasoning_effort, model_name): (Option<ReasoningEffort>, &str) =
-			if matches!(adapter_kind, AdapterKind::OpenAI) {
-				let (reasoning_effort, model_name) = options_set
-					.reasoning_effort()
-					.cloned()
-					.map(|v| (Some(v), model_name))
-					.unwrap_or_else(|| ReasoningEffort::from_model_name(model_name));
-
-				(reasoning_effort, model_name)
-			} else {
-				(None, model_name)
-			};
-
-		// -- Build the basic payload
-
-		let OpenAIRequestParts { messages, tools } = Self::into_openai_request_parts(&model, chat_req)?;
-		let mut payload = json!({
-			"model": model_name,
-			"messages": messages,
-			"stream": stream
-		});
-
-		// -- Set reasoning effort
-		if let Some(reasoning_effort) = reasoning_effort
-			&& let Some(keyword) = reasoning_effort.as_keyword()
-		{
-			payload.x_insert("reasoning_effort", keyword)?;
-		}
-
-		// -- Set verbosity
-		if let Some(verbosity) = options_set.verbosity()
-			&& let Some(keyword) = verbosity.as_keyword()
-		{
-			payload.x_insert("verbosity", keyword)?;
-		}
-
-		// -- Tools
-		if let Some(tools) = tools {
-			payload.x_insert("/tools", tools)?;
-		}
-
-		// -- Add options
-		let response_format = if let Some(response_format) = options_set.response_format() {
-			match response_format {
-				ChatResponseFormat::JsonMode => Some(json!({"type": "json_object"})),
-				ChatResponseFormat::JsonSpec(st_json) => {
-					// "type": "json_schema", "json_schema": {...}
-
-					let mut schema = st_json.schema.clone();
-					schema.x_walk(|parent_map, name| {
-						if name == "type" {
-							let typ = parent_map.get("type").and_then(|v| v.as_str()).unwrap_or("");
-							if typ == "object" {
-								parent_map.insert("additionalProperties".to_string(), false.into());
-							}
-						}
-						true
-					});
-
-					Some(json!({
-						"type": "json_schema",
-						"json_schema": {
-							"name": st_json.name.clone(),
-							"strict": true,
-							// TODO: add description
-							"schema": schema,
-						}
-					}))
-				}
-			}
-		} else {
-			None
-		};
-
-		if let Some(response_format) = response_format {
-			payload["response_format"] = response_format;
-		}
-
-		// -- Add supported ChatOptions
-		if stream & options_set.capture_usage().unwrap_or(false) {
-			payload.x_insert("stream_options", json!({"include_usage": true}))?;
-		}
-
-		if let Some(temperature) = options_set.temperature() {
-			payload.x_insert("temperature", temperature)?;
-		}
-
-		if !options_set.stop_sequences().is_empty() {
-			payload.x_insert("stop", options_set.stop_sequences())?;
-		}
-
-		if let Some(max_tokens) = options_set.max_tokens() {
-			payload.x_insert("max_tokens", max_tokens)?;
-		} else if let Some(custom) = custom.as_ref()
-			&& let Some(max_tokens) = custom.default_max_tokens
-		{
-			payload.x_insert("max_tokens", max_tokens)?;
-		}
-		if let Some(top_p) = options_set.top_p() {
-			payload.x_insert("top_p", top_p)?;
-		}
-		if let Some(seed) = options_set.seed() {
-			payload.x_insert("seed", seed)?;
-		}
-		if let Some(service_tier) = options_set.service_tier()
-			&& let Some(keyword) = service_tier.as_keyword()
-		{
-			payload.x_insert("service_tier", keyword)?;
-		}
-
-		Ok(WebRequestData { url, headers, payload })
-	}
-
-	/// Note: Needs to be called from super::streamer as well
-	pub(super) fn into_usage(adapter: AdapterKind, usage_value: Value) -> Usage {
-		// NOTE: here we make sure we do not fail since we do not want to break a response because usage parsing fail
-		let usage = serde_json::from_value(usage_value).map_err(|err| {
-			error!("Fail to deserialize usage. Cause: {err}");
-			err
-		});
-		let mut usage: Usage = usage.unwrap_or_default();
-		// Will set details to None if no values
-		usage.compact_details();
-
-		// Unfortunately, xAI grok-3 does not compute reasoning tokens correctly.
-		// Example: completion_tokens: 35, completion_tokens_details.reasoning_tokens: 192
-		// BUT completion_tokens should be 35 + 192.
-		// TODO: We might want to do this for other token details as well.
-		// TODO: We could check if the math adds up first with the total token count, and only change it if it does not.
-		//       This will allow us to be forward compatible if/when they fix this bug (yes, it is a bug).
-		if matches!(adapter, AdapterKind::Xai)
-			&& let Some(reasoning_tokens) = usage.completion_tokens_details.as_ref().and_then(|d| d.reasoning_tokens)
-		{
-			let completion_tokens = usage.completion_tokens.unwrap_or(0);
-			usage.completion_tokens = Some(completion_tokens + reasoning_tokens)
-		}
-
-		usage
-	}
-
-	/// Takes the genai ChatMessages and builds the OpenAIChatRequestParts
-	/// - `genai::ChatRequest.system`, if present, is added as the first message with role 'system'.
-	/// - All messages get added with the corresponding roles (tools are not supported for now)
-	fn into_openai_request_parts(_model_iden: &ModelIden, chat_req: ChatRequest) -> Result<OpenAIRequestParts> {
-		let mut messages: Vec<Value> = Vec::new();
-
-		// -- Process the system
-		if let Some(system_msg) = chat_req.system {
-			messages.push(json!({"role": "system", "content": system_msg}));
-		}
-
-		// -- Process the messages
-		for msg in chat_req.messages {
-			// Note: Will handle more types later
-			match msg.role {
-				// For now, system and tool messages go to the system
-				ChatRole::System => {
-					if let Some(content) = msg.content.into_joined_texts() {
-						messages.push(json!({"role": "system", "content": content}))
-					}
-					// TODO: Probably need to warn if it is a ToolCalls type of content
-				}
-
-				// User - For now support Text and Binary
-				ChatRole::User => {
-					// -- If we have only text, then, we jjust returned the joined_texts
-					if msg.content.is_text_only() {
-						// NOTE: for now, if no content, just return empty string (respect current logic)
-						let content = json!(msg.content.joined_texts().unwrap_or_else(String::new));
-						messages.push(json! ({"role": "user", "content": content}));
-					} else {
-						let mut values: Vec<Value> = Vec::new();
-						for part in msg.content {
-							match part {
-								ContentPart::Text(content) => values.push(json!({"type": "text", "text": content})),
-								ContentPart::Binary(binary) => {
-									let is_audio = binary.is_audio();
-									let is_image = binary.is_image();
-									let Binary {
-										content_type, source, ..
-									} = binary;
-
-									if is_audio {
-										match &source {
-											BinarySource::Url(_url) => {
-												warn!(
-													"OpenAI doesn't support audio from URL, need to handle it gracefully"
-												);
-											}
-											BinarySource::Base64(content) => {
-												let mut format = content_type.split('/').next_back().unwrap_or("");
-												if format == "mpeg" {
-													format = "mp3";
-												}
-												values.push(json!({
-													"type": "input_audio",
-													"input_audio": {
-														"data": content,
-														"format": format
-													}
-												}));
-											}
-										}
-									} else if is_image {
-										match &source {
-											BinarySource::Url(url) => {
-												values.push(json!({"type": "image_url", "image_url": {"url": url}}))
-											}
-											BinarySource::Base64(content) => {
-												let image_url = format!("data:{};base64,{}", content_type, content);
-												values
-													.push(json!({"type": "image_url", "image_url": {"url": image_url}}))
-											}
-										}
-									} else {
-										match &source {
-											BinarySource::Url(_url) => {
-												// TODO: Need to return error
-												warn!(
-													"OpenAI doesn't support file from URL, need to handle it gracefully"
-												);
-											}
-											BinarySource::Base64(content) => {
-												let file_data = format!("data:{};base64,{}", content_type, content);
-												values.push(json!({"type": "file", "file": {
-													"filename": binary.name,
-													"file_data": file_data
-												}}))
-											}
-										}
-
-										// "type": "file",
-										// "file": {
-										//     "filename": "draconomicon.pdf",
-										//     "file_data": f"data:application/pdf;base64,{base64_string}",
-										// }
-									}
-								}
-
-								// Use `match` instead of `if let`. This will allow to future-proof this
-								// implementation in case some new message content types would appear,
-								// this way library would not compile if not all methods are implemented
-								// continue would allow to gracefully skip pushing unserializable message
-								// TODO: Probably need to warn if it is a ToolCalls type of content
-								ContentPart::ToolCall(_) => (),
-								ContentPart::ToolResponse(_) => (),
-							}
-						}
-						messages.push(json! ({"role": "user", "content": values}));
-					}
-				}
-
-				// Assistant - For now support Text and ToolCalls
-				ChatRole::Assistant => {
-					// -- If we have only text, then, we jjust returned the joined_texts
-					let mut texts: Vec<String> = Vec::new();
-					let mut tool_calls: Vec<Value> = Vec::new();
-					for part in msg.content {
-						match part {
-							ContentPart::Text(text) => texts.push(text),
-							ContentPart::ToolCall(tool_call) => {
-								//
-								tool_calls.push(json!({
-									"type": "function",
-									"id": tool_call.call_id,
-									"function": {
-										"name": tool_call.fn_name,
-										"arguments": tool_call.fn_arguments.to_string(),
-									}
-								}))
-							}
-
-							// TODO: Probably need towarn on this one (probably need to add binary here)
-							ContentPart::Binary(_) => (),
-							ContentPart::ToolResponse(_) => (),
-						}
-					}
-					let content = texts.join("\n\n");
-					let mut message = json!({"role": "assistant", "content": content});
-					if !tool_calls.is_empty() {
-						message.x_insert("tool_calls", tool_calls)?;
-					}
-					messages.push(message);
-				}
-
-				// Tool - For now, support only tool responses
-				ChatRole::Tool => {
-					for part in msg.content {
-						if let ContentPart::ToolResponse(tool_response) = part {
-							messages.push(json!({
-								"role": "tool",
-								"content": tool_response.content,
-								"tool_call_id": tool_response.call_id,
-							}))
-						}
-					}
-
-					// TODO: Probably need to trace/warn that this will be ignored
-				}
-			}
-		}
-
-		// -- Process the tools
-		let tools = chat_req.tools.map(|tools| {
-			tools
-				.into_iter()
-				.map(|tool| {
-					// TODO: Need to handle the error correctly
-					// TODO: Needs to have a custom serializer (tool should not have to match to a provider)
-					// NOTE: Right now, low probability, so, we just return null if cannot convert to value.
-					json!({
-						"type": "function",
-						"function": {
-							"name": tool.name,
-							"description": tool.description,
-							"parameters": tool.schema,
-							// TODO: If we need to support `strict: true` we need to add additionalProperties: false into the schema
-							//       above (like structured output)
-							"strict": false,
-						}
-					})
-				})
-				.collect::<Vec<Value>>()
-		});
-
-		Ok(OpenAIRequestParts { messages, tools })
-	}
-}
 
 // region:    --- Support
 
@@ -731,11 +330,6 @@ fn extract_think(content: String) -> (String, Option<String>) {
 	}
 
 	(content, None)
-}
-
-struct OpenAIRequestParts {
-	messages: Vec<Value>,
-	tools: Option<Vec<Value>>,
 }
 
 fn parse_tool_calls(raw_tool_calls: Value) -> Result<Vec<ToolCall>> {
@@ -793,6 +387,7 @@ fn parse_tool_call(raw_tool_call: Value) -> Result<ToolCall> {
 		call_id: iterim.id,
 		fn_name,
 		fn_arguments,
+		thought_signatures: None,
 	})
 }
 
