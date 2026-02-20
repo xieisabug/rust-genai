@@ -80,7 +80,7 @@ impl Adapter for CohereAdapter {
 		let api_key = get_api_key(auth, &model_iden)?;
 
 		// 构建请求头
-		let headers = vec![(String::from("Authorization"), format!("Bearer {api_key}"))];
+		let headers = Headers::from(vec![(String::from("Authorization"), format!("Bearer {api_key}"))]);
 
 		// 使用传入的 WebClient 发送请求
 		let web_response = web_client

@@ -5,14 +5,13 @@ use super::types::*;
 use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{
 	ChatOptionsSet, ChatRequest, ChatResponse, ChatRole, ChatStreamResponse, ContentPart, MessageContent, ToolCall,
-	Usage,
+	ToolName, Usage,
 };
 use crate::embed::{EmbedOptionsSet, EmbedRequest, EmbedResponse};
 use crate::resolver::{AuthData, Endpoint};
-use crate::webc::WebResponse;
+use crate::webc::{EventSourceStream, WebResponse};
 use crate::{Error, Headers, Model, ModelIden, Result, ServiceTarget};
 use reqwest::RequestBuilder;
-use reqwest_eventsource::EventSource;
 
 pub struct CopilotAdapter;
 
@@ -133,6 +132,7 @@ impl CopilotAdapter {
 					ContentPart::ToolResponse(tr) => {
 						tool_responses_vec.push(tr);
 					}
+					ContentPart::ThoughtSignature(_) | ContentPart::Custom(_) => {}
 				}
 			}
 
@@ -197,7 +197,10 @@ impl CopilotAdapter {
 				.map(|tool| CopilotTool {
 					tool_type: "function".to_string(),
 					function: CopilotFunction {
-						name: tool.name,
+						name: match tool.name {
+							ToolName::WebSearch => "web_search".to_string(),
+							ToolName::Custom(name) => name,
+						},
 						description: tool.description,
 						parameters: tool.schema.unwrap_or_default(),
 					},
@@ -220,6 +223,8 @@ impl CopilotAdapter {
 }
 
 impl Adapter for CopilotAdapter {
+	const DEFAULT_API_KEY_ENV_NAME: Option<&'static str> = Some(Self::API_KEY_DEFAULT_ENV_NAME);
+
 	fn default_auth() -> AuthData {
 		AuthData::from_env(Self::API_KEY_DEFAULT_ENV_NAME)
 	}
@@ -250,13 +255,13 @@ impl Adapter for CopilotAdapter {
 		let api_token = get_api_key(auth, &model_iden)?;
 
 		// Build request headers - align with Zed
-		let headers = vec![
+		let headers = Headers::from(vec![
 			("Authorization".to_string(), format!("Bearer {}", api_token)),
 			("Content-Type".to_string(), "application/json".to_string()),
 			("Copilot-Integration-Id".to_string(), "vscode-chat".to_string()),
 			("Editor-Version".to_string(), "vscode/1.103.2".to_string()),
 			("x-github-api-version".to_string(), "2025-05-01".to_string()),
-		];
+		]);
 
 		// Use the passed WebClient to send request
 		let mut web_response = web_client
@@ -313,7 +318,7 @@ impl Adapter for CopilotAdapter {
 	) -> Result<WebRequestData> {
 		use crate::adapter::adapters::support::get_api_key;
 		let ServiceTarget { model, auth, .. } = target;
-		let (model_name, _) = model.model_name.as_model_name_and_namespace();
+		let (_, model_name) = model.model_name.namespace_and_name();
 
 		// Note: In a real implementation, this would need to be async to fetch the API token
 		// For now, we create a placeholder that will be replaced by the client
@@ -413,6 +418,7 @@ impl Adapter for CopilotAdapter {
 						call_id: tc.id.clone(),
 						fn_name: tc.function.name.clone(),
 						fn_arguments,
+						thought_signatures: None,
 					}));
 				}
 			}
@@ -435,7 +441,7 @@ impl Adapter for CopilotAdapter {
 	) -> Result<ChatStreamResponse> {
 		use crate::chat::ChatStream;
 		
-		let event_source = EventSource::new(reqwest_builder)?;
+		let event_source = EventSourceStream::new(reqwest_builder);
 		let streamer = CopilotStreamer::new(event_source, model_iden.clone(), options_set);
 		let chat_stream = ChatStream::from_inter_stream(streamer);
 

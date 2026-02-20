@@ -22,12 +22,12 @@ async fn test_chat_multi_system_ok() -> TestResult<()> {
 // DeepSeek-R1-0528 now supports JSON output and function calling
 #[tokio::test]
 async fn test_chat_json_mode_ok() -> TestResult<()> {
-	common_tests::common_test_chat_json_mode_ok(MODEL, Some(Check::REASONING | Check::USAGE)).await
+	common_tests::common_test_chat_json_mode_ok(MODEL, Some(Check::REASONING_CONTENT | Check::USAGE)).await
 }
 
 #[tokio::test]
 async fn test_chat_json_structured_ok() -> TestResult<()> {
-	common_tests::common_test_chat_json_structured_ok(MODEL, Some(Check::REASONING | Check::USAGE)).await
+	common_tests::common_test_chat_json_structured_ok(MODEL, Some(Check::REASONING_CONTENT | Check::USAGE)).await
 }
 
 #[tokio::test]

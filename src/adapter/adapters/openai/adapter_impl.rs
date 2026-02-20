@@ -8,7 +8,7 @@ use crate::chat::{
 use crate::common::{Modality, ReasoningEffortType};
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::{EventSourceStream, WebResponse};
-use crate::{Error, Model, Result};
+use crate::{Error, Headers, Model, Result};
 use crate::{ModelIden, ServiceTarget};
 use reqwest::RequestBuilder;
 use serde::Deserialize;
@@ -151,7 +151,7 @@ impl Adapter for OpenAIAdapter {
 		let api_key = get_api_key(auth, &model_iden)?;
 
 		// 构建请求头
-		let headers = vec![("Authorization".to_string(), format!("Bearer {api_key}"))];
+		let headers = Headers::from(vec![("Authorization".to_string(), format!("Bearer {api_key}"))]);
 
 		// 使用传入的 WebClient 发送请求
 		let mut web_response = web_client

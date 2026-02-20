@@ -141,6 +141,9 @@ impl ModelCapabilities {
 			| AdapterKind::Nebius
 			| AdapterKind::Ollama
 			| AdapterKind::Zai
+			| AdapterKind::Mimo
+			| AdapterKind::BigModel
+			| AdapterKind::Aliyun
 			| AdapterKind::Copilot => Some(true),
 		}
 	}
@@ -159,6 +162,9 @@ impl ModelCapabilities {
 			| AdapterKind::Nebius
 			| AdapterKind::Ollama
 			| AdapterKind::Zai
+			| AdapterKind::Mimo
+			| AdapterKind::BigModel
+			| AdapterKind::Aliyun
 			| AdapterKind::Copilot => Some(true),
 		}
 	}
@@ -343,6 +349,9 @@ impl ModelCapabilities {
 			AdapterKind::Xai => Self::xai_token_limits(model_id),
 			AdapterKind::Nebius => Self::nebius_token_limits(model_id),
 			AdapterKind::Ollama => Self::ollama_token_limits(model_id),
+			AdapterKind::Mimo => Self::openai_specific_token_limits(model_id),
+			AdapterKind::Aliyun => Self::openai_specific_token_limits(model_id),
+			AdapterKind::BigModel => Self::zai_token_limits(model_id),
 			AdapterKind::Zai => Self::zai_token_limits(model_id),
 		}
 	}

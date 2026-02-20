@@ -9,6 +9,10 @@ use reqwest::RequestBuilder;
 use crate::adapter::ModelCapabilities;
 
 pub struct NebiusAdapter;
+const MODELS: &[&str] = &[
+	"Qwen/Qwen3-235B-A22B",
+	"meta-llama/Llama-3.1-70B-Instruct",
+];
 
 impl NebiusAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "NEBIUS_API_KEY";

@@ -70,7 +70,10 @@ impl Adapter for OllamaAdapter {
 		let base_url = endpoint.base_url();
 		let url = format!("{base_url}api/tags");
 
-		let mut res = web_client.do_get(&url, &[]).await.map_err(|webc_error| Error::WebAdapterCall {
+		let mut res = web_client
+			.do_get(&url, &Headers::default())
+			.await
+			.map_err(|webc_error| Error::WebAdapterCall {
 			adapter_kind,
 			webc_error,
 		})?;

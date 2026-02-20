@@ -4,22 +4,22 @@ use super::types::CopilotStreamResponse;
 use crate::adapter::adapters::support::{StreamerCapturedData, StreamerOptions};
 use crate::adapter::inter_stream::{InterStreamEnd, InterStreamEvent};
 use crate::chat::{ChatOptionsSet, ToolCall, Usage};
+use crate::webc::{Event, EventSourceStream};
 use crate::{Error, ModelIden, Result};
 use futures::stream::Stream;
-use reqwest_eventsource::{Event, EventSource};
 use serde_json::from_str;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
 pub struct CopilotStreamer {
-	event_source: EventSource,
+	event_source: EventSourceStream,
 	options: StreamerOptions,
 	done: bool,
 	captured_data: StreamerCapturedData,
 }
 
 impl CopilotStreamer {
-	pub fn new(event_source: EventSource, model_iden: ModelIden, options_set: ChatOptionsSet<'_, '_>) -> Self {
+	pub fn new(event_source: EventSourceStream, model_iden: ModelIden, options_set: ChatOptionsSet<'_, '_>) -> Self {
 		Self {
 			event_source,
 			options: StreamerOptions::new(model_iden, options_set),
@@ -58,6 +58,7 @@ impl Stream for CopilotStreamer {
 							captured_text_content: self.captured_data.content.take(),
 							captured_reasoning_content: self.captured_data.reasoning_content.take(),
 							captured_tool_calls: self.captured_data.tool_calls.take(),
+							captured_thought_signatures: None,
 						};
 						return Poll::Ready(Some(Ok(InterStreamEvent::End(inter_stream_end))));
 					}
@@ -118,6 +119,7 @@ impl Stream for CopilotStreamer {
 											call_id: id.clone(),
 											fn_name: name.clone(),
 											fn_arguments,
+											thought_signatures: None,
 										};
 
 										// Capture tool calls if enabled
@@ -147,6 +149,7 @@ impl Stream for CopilotStreamer {
 								captured_text_content: self.captured_data.content.take(),
 								captured_reasoning_content: self.captured_data.reasoning_content.take(),
 								captured_tool_calls: self.captured_data.tool_calls.take(),
+								captured_thought_signatures: None,
 							};
 							return Poll::Ready(Some(Ok(InterStreamEvent::End(inter_stream_end))));
 						}

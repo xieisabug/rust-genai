@@ -4,7 +4,7 @@ use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse};
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
-use crate::{Result, ServiceTarget};
+use crate::{Model, Result, ServiceTarget};
 use reqwest::RequestBuilder;
 
 pub struct MimoAdapter;
@@ -30,6 +30,10 @@ impl Adapter for MimoAdapter {
 
 	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>> {
 		OpenAIAdapter::list_model_names_for_end_target(kind, Self::default_endpoint(), Self::default_auth()).await
+	}
+
+	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
+		OpenAIAdapter::all_models(kind, target, web_client).await
 	}
 
 	fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {

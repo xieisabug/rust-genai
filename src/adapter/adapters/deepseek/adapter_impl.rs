@@ -5,7 +5,7 @@ use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse};
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
-use crate::{Error, Result, ServiceTarget};
+use crate::{Error, Headers, Result, ServiceTarget};
 use crate::{Model};
 use reqwest::RequestBuilder;
 use serde_json::Value;
@@ -13,6 +13,7 @@ use value_ext::JsonValueExt;
 use crate::adapter::ModelCapabilities;
 
 pub struct DeepSeekAdapter;
+const MODELS: &[&str] = &["deepseek-chat", "deepseek-reasoner"];
 
 impl DeepSeekAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "DEEPSEEK_API_KEY";
@@ -53,7 +54,7 @@ impl Adapter for DeepSeekAdapter {
 		let api_key = get_api_key(auth, &model_iden)?;
 
 		// 构建请求头
-		let headers = vec![(String::from("Authorization"), format!("Bearer {api_key}"))];
+		let headers = Headers::from(vec![(String::from("Authorization"), format!("Bearer {api_key}"))]);
 
 		// 使用传入的 WebClient 发送请求
 		let web_response = web_client

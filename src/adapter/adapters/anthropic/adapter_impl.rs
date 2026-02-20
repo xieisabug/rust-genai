@@ -18,6 +18,13 @@ use crate::{Model};
 use crate::adapter::ModelCapabilities;
 
 pub struct AnthropicAdapter;
+const MODELS: &[&str] = &[
+	"claude-sonnet-4-20250514",
+	"claude-opus-4-20250514",
+	"claude-3-7-sonnet-20250219",
+	"claude-3-5-sonnet-20241022",
+	"claude-3-5-haiku-20241022",
+];
 
 const REASONING_LOW: u32 = 1024;
 const REASONING_MEDIUM: u32 = 8000;
@@ -156,10 +163,10 @@ impl Adapter for AnthropicAdapter {
 		let api_key = get_api_key(auth, &model_iden)?;
 
 		// 构建请求头 - Anthropic 使用不同的认证头格式
-		let headers = vec![
+		let headers = Headers::from(vec![
 			("x-api-key".to_string(), api_key),
 			("anthropic-version".to_string(), ANTHROPIC_VERSION.to_string()),
-		];
+		]);
 
 		// 使用传入的 WebClient 发送请求
 		let web_response = web_client

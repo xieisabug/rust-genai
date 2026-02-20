@@ -31,6 +31,7 @@ impl OpenAIAdapter {
 		let suffix = match service_type {
 			ServiceType::Chat | ServiceType::ChatStream => "chat/completions",
 			ServiceType::Embed => "embeddings",
+			ServiceType::Models => "models",
 		};
 		let mut full_url = base_url.join(suffix).map_err(|err| {
 			Error::Internal(format!(

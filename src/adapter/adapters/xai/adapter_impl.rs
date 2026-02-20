@@ -5,7 +5,7 @@ use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse};
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
-use crate::{Error, Result, ServiceTarget};
+use crate::{Error, Headers, Result, ServiceTarget};
 use reqwest::RequestBuilder;
 use crate::adapter::ModelCapabilities;
 use serde_json::Value;
@@ -67,7 +67,7 @@ impl Adapter for XaiAdapter {
 		let api_key = get_api_key(auth, &model_iden)?;
 
 		// 构建请求头 - xAI 使用与 OpenAI 相同的 Bearer token 格式
-		let headers = vec![("Authorization".to_string(), format!("Bearer {api_key}"))];
+		let headers = Headers::from(vec![("Authorization".to_string(), format!("Bearer {api_key}"))]);
 
 		// 使用传入的 WebClient 发送请求
 		let web_response = web_client

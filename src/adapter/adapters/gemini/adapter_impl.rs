@@ -130,7 +130,7 @@ impl Adapter for GeminiAdapter {
 		let api_key = get_api_key(auth, &model_iden)?;
 
 		// 构建请求头 - Gemini 使用 x-goog-api-key 头部
-		let headers = vec![(String::from("x-goog-api-key"), api_key)];
+		let headers = Headers::from(vec![(String::from("x-goog-api-key"), api_key)]);
 
 		// 使用传入的 WebClient 发送请求
 		let web_response = web_client

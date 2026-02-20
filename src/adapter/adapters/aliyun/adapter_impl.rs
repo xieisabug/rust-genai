@@ -5,7 +5,7 @@ use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse};
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
-use crate::{ModelIden, Result, ServiceTarget};
+use crate::{Model, ModelIden, Result, ServiceTarget};
 use reqwest::RequestBuilder;
 
 /// Aliyun Adapter - Uses OpenAI-compatible API for Dashscope (Aliyun)
@@ -83,8 +83,13 @@ impl Adapter for AliyunAdapter {
 		let url = match service_type {
 			ServiceType::Chat | ServiceType::ChatStream => format!("{base_url}chat/completions"),
 			ServiceType::Embed => format!("{base_url}embeddings"),
+			ServiceType::Models => format!("{base_url}models"),
 		};
 		Ok(url)
+	}
+
+	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
+		OpenAIAdapter::all_models(kind, target, web_client).await
 	}
 
 	/// Converts chat request data to web request format
