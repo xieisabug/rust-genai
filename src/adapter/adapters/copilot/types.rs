@@ -160,6 +160,8 @@ pub struct CopilotStreamResponse {
 	pub model: String,
 	#[serde(default)]
 	pub choices: Vec<CopilotStreamChoice>,
+	#[serde(default)]
+	pub usage: Option<CopilotUsage>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
