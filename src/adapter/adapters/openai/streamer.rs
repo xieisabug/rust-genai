@@ -318,3 +318,39 @@ impl futures::Stream for OpenAIStreamer {
 		Poll::Pending
 	}
 }
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::chat::ChatOptionsSet;
+
+	fn new_streamer_with_tool_capture() -> OpenAIStreamer {
+		let client = reqwest::Client::new();
+		let reqwest_builder = client.get("http://127.0.0.1/");
+		let inner = EventSourceStream::new(reqwest_builder);
+		let model_iden = ModelIden::from_static(AdapterKind::OpenAI, "gpt-4o");
+		let options_set = ChatOptionsSet::default();
+		let mut streamer = OpenAIStreamer::new(inner, model_iden, options_set);
+		streamer.options.capture_tool_calls = true;
+		streamer
+	}
+
+	#[test]
+	fn capture_tool_call_index_gap_does_not_panic_and_merges_arguments() {
+		let mut streamer = new_streamer_with_tool_capture();
+
+		// index 0 first, then index 1 chunks; this previously triggered out-of-bounds in direct indexing logic.
+		streamer.capture_tool_call(0, "call_0".to_string(), "tool0".to_string(), String::new());
+		streamer.capture_tool_call(1, "call_1".to_string(), "tool1".to_string(), "{".to_string());
+		streamer.capture_tool_call(1, "call_1".to_string(), String::new(), "\"name\":\"firecrawl\"}".to_string());
+
+		let calls = streamer.captured_data.tool_calls.expect("tool calls should be captured");
+		assert_eq!(calls.len(), 2);
+		assert_eq!(calls[1].call_id, "call_1");
+		assert_eq!(calls[1].fn_name, "tool1");
+		assert_eq!(
+			calls[1].fn_arguments,
+			Value::String("{\"name\":\"firecrawl\"}".to_string())
+		);
+	}
+}
