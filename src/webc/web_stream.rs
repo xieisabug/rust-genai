@@ -20,6 +20,7 @@ pub struct WebStream {
 	reqwest_builder: Option<RequestBuilder>,
 	response_future: Option<Pin<Box<dyn Future<Output = Result<Response, BoxError>> + Send>>>,
 	bytes_stream: Option<Pin<Box<dyn Stream<Item = Result<Bytes, BoxError>> + Send>>>,
+	pending_utf8_bytes: Vec<u8>,
 	// If a poll was a partial message, then we keep the previous part
 	partial_message: Option<String>,
 	// If a poll retrieved multiple messages, we keep them to be sent in the next poll
@@ -40,6 +41,7 @@ impl WebStream {
 			reqwest_builder: Some(reqwest_builder),
 			response_future: None,
 			bytes_stream: None,
+			pending_utf8_bytes: Vec::new(),
 			partial_message: None,
 			remaining_messages: None,
 		}
@@ -51,6 +53,7 @@ impl WebStream {
 			reqwest_builder: Some(reqwest_builder),
 			response_future: None,
 			bytes_stream: None,
+			pending_utf8_bytes: Vec::new(),
 			partial_message: None,
 			remaining_messages: None,
 		}
@@ -110,50 +113,37 @@ impl Stream for WebStream {
 			if let Some(ref mut stream) = this.bytes_stream {
 				match stream.as_mut().poll_next(cx) {
 					Poll::Ready(Some(Ok(bytes))) => {
-						let buff_string = match String::from_utf8(bytes.to_vec()) {
-							Ok(s) => s,
-							Err(e) => return Poll::Ready(Some(Err(Box::new(e) as BoxError))),
-						};
-
-						// -- Iterate through the parts
-						let buff_response = match this.stream_mode {
-							StreamMode::Delimiter(delimiter) => {
-								process_buff_string_delimited(buff_string, &mut this.partial_message, delimiter)
-							}
-							StreamMode::PrettyJsonArray => {
-								new_with_pretty_json_array(buff_string, &mut this.partial_message)
-							}
-						};
-
-						let BuffResponse {
-							mut first_message,
-							next_messages,
-							candidate_message,
-						} = buff_response?;
-
-						// -- Add next_messages as remaining messages if present
-						if let Some(next_messages) = next_messages {
-							this.remaining_messages.get_or_insert(VecDeque::new()).extend(next_messages);
-						}
-
-						// -- If we still have a candidate, it's the partial for the next one
-						if let Some(candidate_message) = candidate_message {
-							// For now, we will just log this
-							if this.partial_message.is_some() {
-								tracing::warn!("GENAI - WARNING - partial_message is not none");
-							}
-							this.partial_message = Some(candidate_message);
-						}
-
-						// -- If we have a first message, we have to send it.
-						if let Some(first_message) = first_message.take() {
-							return Poll::Ready(Some(Ok(first_message)));
-						} else {
+						let Some(buff_string) = decode_utf8_chunk(&bytes, &mut this.pending_utf8_bytes)? else {
 							continue;
+						};
+
+						if let Some(first_message) = process_decoded_text(
+							&this.stream_mode,
+							buff_string,
+							&mut this.partial_message,
+							&mut this.remaining_messages,
+						)? {
+							return Poll::Ready(Some(Ok(first_message)));
 						}
+						continue;
 					}
 					Poll::Ready(Some(Err(e))) => return Poll::Ready(Some(Err(e))),
 					Poll::Ready(None) => {
+						if !this.pending_utf8_bytes.is_empty() {
+							let pending = std::mem::take(&mut this.pending_utf8_bytes);
+							let buff_string =
+								String::from_utf8(pending).map_err(|e| -> BoxError { Box::new(e) as BoxError })?;
+
+							if let Some(first_message) = process_decoded_text(
+								&this.stream_mode,
+								buff_string,
+								&mut this.partial_message,
+								&mut this.remaining_messages,
+							)? {
+								return Poll::Ready(Some(Ok(first_message)));
+							}
+						}
+
 						if let Some(partial) = this.partial_message.take()
 							&& !partial.is_empty()
 						{
@@ -180,6 +170,69 @@ struct BuffResponse {
 	first_message: Option<String>,
 	next_messages: Option<Vec<String>>,
 	candidate_message: Option<String>,
+}
+
+fn decode_utf8_chunk(bytes: &[u8], pending_utf8_bytes: &mut Vec<u8>) -> Result<Option<String>, BoxError> {
+	pending_utf8_bytes.extend_from_slice(bytes);
+
+	match std::str::from_utf8(pending_utf8_bytes) {
+		Ok(valid_str) => {
+			let decoded = valid_str.to_string();
+			pending_utf8_bytes.clear();
+			Ok((!decoded.is_empty()).then_some(decoded))
+		}
+		Err(utf8_error) => {
+			// Incomplete multibyte codepoint at the end: keep bytes for next chunk.
+			if utf8_error.error_len().is_none() {
+				let valid_up_to = utf8_error.valid_up_to();
+				if valid_up_to == 0 {
+					return Ok(None);
+				}
+
+				let decoded = std::str::from_utf8(&pending_utf8_bytes[..valid_up_to])
+					.map_err(|e| -> BoxError { Box::new(e) as BoxError })?
+					.to_string();
+				let remaining = pending_utf8_bytes.split_off(valid_up_to);
+				*pending_utf8_bytes = remaining;
+				Ok((!decoded.is_empty()).then_some(decoded))
+			} else {
+				Err(Box::new(utf8_error) as BoxError)
+			}
+		}
+	}
+}
+
+fn process_decoded_text(
+	stream_mode: &StreamMode,
+	buff_string: String,
+	partial_message: &mut Option<String>,
+	remaining_messages: &mut Option<VecDeque<String>>,
+) -> Result<Option<String>, BoxError> {
+	let buff_response = match stream_mode {
+		StreamMode::Delimiter(delimiter) => process_buff_string_delimited(buff_string, partial_message, delimiter),
+		StreamMode::PrettyJsonArray => new_with_pretty_json_array(buff_string, partial_message),
+	}?;
+
+	let BuffResponse {
+		first_message,
+		next_messages,
+		candidate_message,
+	} = buff_response;
+
+	// -- Add next_messages as remaining messages if present
+	if let Some(next_messages) = next_messages {
+		remaining_messages.get_or_insert(VecDeque::new()).extend(next_messages);
+	}
+
+	// -- If we still have a candidate, it's the partial for the next one
+	if let Some(candidate_message) = candidate_message {
+		if partial_message.is_some() {
+			tracing::warn!("GENAI - WARNING - partial_message is not none");
+		}
+		*partial_message = Some(candidate_message);
+	}
+
+	Ok(first_message)
 }
 
 /// Process a string buffer for the pretty_json_array (for Gemini)
@@ -338,4 +391,95 @@ fn process_buff_string_delimited(
 		next_messages,
 		candidate_message,
 	})
+}
+
+#[cfg(test)]
+mod tests {
+	use super::{decode_utf8_chunk, process_decoded_text, StreamMode};
+
+	#[test]
+	fn multibyte_utf8_split_across_chunks_should_not_error() {
+		let ch = "你".as_bytes();
+		let mut pending = Vec::new();
+
+		let first = decode_utf8_chunk(&ch[..2], &mut pending).expect("first chunk should not error");
+		assert!(first.is_none());
+
+		let second = decode_utf8_chunk(&ch[2..], &mut pending).expect("second chunk should complete utf8");
+		assert_eq!(second.as_deref(), Some("你"));
+		assert!(pending.is_empty());
+	}
+
+	#[test]
+	fn sse_event_split_across_multiple_chunks_should_parse() {
+		let mut pending_utf8 = Vec::new();
+		let mut partial_message = None;
+		let mut remaining_messages = None;
+		let stream_mode = StreamMode::Delimiter("\n\n");
+
+		let c1 = decode_utf8_chunk("data: hel".as_bytes(), &mut pending_utf8).expect("decode c1");
+		let msg1 = process_decoded_text(
+			&stream_mode,
+			c1.expect("decoded text for c1"),
+			&mut partial_message,
+			&mut remaining_messages,
+		)
+		.expect("process c1");
+		assert!(msg1.is_none());
+
+		let c2 = decode_utf8_chunk("lo\n\n".as_bytes(), &mut pending_utf8).expect("decode c2");
+		let msg2 = process_decoded_text(
+			&stream_mode,
+			c2.expect("decoded text for c2"),
+			&mut partial_message,
+			&mut remaining_messages,
+		)
+		.expect("process c2");
+		assert_eq!(msg2.as_deref(), Some("data: hello"));
+	}
+
+	#[test]
+	fn incomplete_utf8_with_error_len_none_should_wait_for_more_bytes() {
+		let ch = "中".as_bytes();
+		let mut pending = Vec::new();
+		let result = decode_utf8_chunk(&ch[..1], &mut pending).expect("incomplete utf8 should be buffered");
+
+		assert!(result.is_none());
+		assert_eq!(pending, vec![ch[0]]);
+	}
+
+	#[test]
+	fn true_invalid_utf8_should_return_clear_parse_error() {
+		let mut pending = Vec::new();
+		let err = decode_utf8_chunk(&[0xF0, 0x28, 0x8C, 0x28], &mut pending).expect_err("must fail");
+		assert!(err.to_string().contains("invalid utf-8"));
+	}
+
+	#[test]
+	fn done_marker_split_across_chunks_should_still_terminate_normally() {
+		let mut pending_utf8 = Vec::new();
+		let mut partial_message = None;
+		let mut remaining_messages = None;
+		let stream_mode = StreamMode::Delimiter("\n\n");
+
+		let c1 = decode_utf8_chunk("data: [DO".as_bytes(), &mut pending_utf8).expect("decode c1");
+		let msg1 = process_decoded_text(
+			&stream_mode,
+			c1.expect("decoded text for c1"),
+			&mut partial_message,
+			&mut remaining_messages,
+		)
+		.expect("process c1");
+		assert!(msg1.is_none());
+
+		let c2 = decode_utf8_chunk("NE]\n\n".as_bytes(), &mut pending_utf8).expect("decode c2");
+		let msg2 = process_decoded_text(
+			&stream_mode,
+			c2.expect("decoded text for c2"),
+			&mut partial_message,
+			&mut remaining_messages,
+		)
+		.expect("process c2");
+		assert_eq!(msg2.as_deref(), Some("data: [DONE]"));
+	}
 }
