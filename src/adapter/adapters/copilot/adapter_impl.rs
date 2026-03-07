@@ -132,7 +132,7 @@ impl CopilotAdapter {
 					ContentPart::ToolResponse(tr) => {
 						tool_responses_vec.push(tr);
 					}
-					ContentPart::ThoughtSignature(_) | ContentPart::Custom(_) => {}
+					ContentPart::ThoughtSignature(_) | ContentPart::ReasoningContent(_) | ContentPart::Custom(_) => {}
 				}
 			}
 
@@ -234,7 +234,7 @@ impl Adapter for CopilotAdapter {
 		Endpoint::from_owned("https://api.individual.githubcopilot.com".to_string())
 	}
 
-	async fn all_model_names(_kind: AdapterKind) -> Result<Vec<String>> {
+	async fn all_model_names(_kind: AdapterKind, _endpoint: Endpoint, _auth: AuthData) -> Result<Vec<String>> {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 

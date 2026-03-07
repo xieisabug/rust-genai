@@ -144,8 +144,8 @@ impl Adapter for AnthropicAdapter {
 		}
 	}
 
-	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>> {
-		Self::list_model_names_for_end_target(kind, Self::default_endpoint(), Self::default_auth()).await
+	async fn all_model_names(kind: AdapterKind, endpoint: Endpoint, auth: AuthData) -> Result<Vec<String>> {
+		Self::list_model_names_for_end_target(kind, endpoint, auth).await
 	}
 
 	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
@@ -441,7 +441,7 @@ impl Adapter for AnthropicAdapter {
 				other_typ => {
 					// insert it back
 					item.x_insert("type", other_typ)?;
-					content.push(ContentPart::from_custom(model_iden.clone(), item))
+					content.push(ContentPart::from_custom(item, Some(model_iden.clone())))
 				}
 			}
 		}
@@ -702,6 +702,7 @@ impl AnthropicAdapter {
 									}));
 								}
 								ContentPart::ThoughtSignature(_) => {}
+								ContentPart::ReasoningContent(_) => {}
 								// Custom are ignored for this logic
 								ContentPart::Custom(_) => {}
 							}
@@ -737,6 +738,7 @@ impl AnthropicAdapter {
 							ContentPart::Binary(_) => {}
 							ContentPart::ToolResponse(_) => {}
 							ContentPart::ThoughtSignature(_) => {}
+							ContentPart::ReasoningContent(_) => {}
 							// Custom are ignored for this logic
 							ContentPart::Custom(_) => {}
 						}

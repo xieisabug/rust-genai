@@ -38,18 +38,13 @@ impl Adapter for OpenAIRespAdapter {
 	}
 
 	/// Note: Currently returns the common models (see above)
-	async fn all_model_names(kind: AdapterKind) -> Result<Vec<String>> {
+	async fn all_model_names(kind: AdapterKind, endpoint: Endpoint, auth: AuthData) -> Result<Vec<String>> {
 		//
-		OpenAIAdapter::list_model_names_for_end_target(
-			kind,
-			OpenAIAdapter::default_endpoint(),
-			OpenAIAdapter::default_auth(),
-		)
-		.await
+		OpenAIAdapter::list_model_names_for_end_target(kind, endpoint, auth).await
 	}
 
-	async fn all_models(kind: AdapterKind, _target: ServiceTarget, _web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
-		let names = Self::all_model_names(kind).await?;
+	async fn all_models(kind: AdapterKind, target: ServiceTarget, _web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
+		let names = Self::all_model_names(kind, target.endpoint, target.auth).await?;
 		let mut models: Vec<Model> = Vec::new();
 		for id in names {
 			let model_name: crate::ModelName = id.clone().into();
@@ -416,6 +411,7 @@ impl OpenAIRespAdapter {
 								ContentPart::ToolCall(_) => (),
 								ContentPart::ToolResponse(_) => (),
 								ContentPart::ThoughtSignature(_) => (),
+								ContentPart::ReasoningContent(_) => (),
 								// Custom are ignored for this logic
 								ContentPart::Custom(_) => {}
 							}
@@ -461,6 +457,7 @@ impl OpenAIRespAdapter {
 							ContentPart::Binary(_) => {}
 							ContentPart::ToolResponse(_) => {}
 							ContentPart::ThoughtSignature(_) => {}
+							ContentPart::ReasoningContent(_) => {}
 							// Custom are ignored for this logic
 							ContentPart::Custom(_) => {}
 						}
