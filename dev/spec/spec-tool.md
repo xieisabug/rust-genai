@@ -57,6 +57,7 @@ pub struct ToolResponse {
 ### Integration Points
 
 - `ChatRequest::with_tools(iter)`: Registers available tools for the request.
+- `ChatRequest::append_tool_use_from_chat_response(response, tool_response)`: A high-level helper for handling the assistant turn and tool response from non-streaming chats.
 - `ChatRequest::append_tool_use_from_stream_end(end, response)`: A high-level helper for handling the assistant turn and tool response in iterative loops.
 - `ChatMessage::from(Vec<ToolCall>)`: Automatically creates an assistant message containing the tool calls.
 - `ChatMessage::from(ToolResponse)`: Automatically creates a tool-role message.
@@ -90,11 +91,12 @@ let chat_req = ChatRequest::from_user("What is the weather in Paris?")
     .with_tools([tool]);
 
 // 3. Execute chat (omitted client setup)
-let response = client.exec_chat(model, chat_req, None).await?;
+let response = client.exec_chat(model, chat_req.clone(), None).await?;
 
 // 4. Handle tool calls if present
 if let Some(tool_call) = response.tool_calls().first() {
     let result = ToolResponse::new(&tool_call.call_id, "Rainy, 15°C");
+    let next_req = chat_req.append_tool_use_from_chat_response(&response, result);
 }
 ```
 

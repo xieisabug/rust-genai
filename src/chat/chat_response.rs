@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::ModelIden;
-use crate::chat::{ChatStream, MessageContent, ToolCall, Usage};
+use crate::chat::{ChatMessage, ChatStream, MessageContent, ToolCall, Usage};
 
 // region:    --- ChatResponse
 
@@ -66,6 +66,27 @@ impl ChatResponse {
 	pub fn into_tool_calls(self) -> Vec<ToolCall> {
 		self.content.into_tool_calls()
 	}
+
+	/// Builds an assistant history message for a tool-use continuation, preserving
+	/// the full assistant content plus any extracted reasoning content.
+	pub fn assistant_message_for_tool_use(&self) -> Option<ChatMessage> {
+		if !self.content.contains_tool_call() {
+			return None;
+		}
+
+		Some(ChatMessage::assistant(self.content.clone()).with_reasoning_content(self.reasoning_content.clone()))
+	}
+
+	/// Consumes self and builds an assistant history message for a tool-use
+	/// continuation, preserving the full assistant content plus any extracted
+	/// reasoning content.
+	pub fn into_assistant_message_for_tool_use(self) -> Option<ChatMessage> {
+		if !self.content.contains_tool_call() {
+			return None;
+		}
+
+		Some(ChatMessage::assistant(self.content).with_reasoning_content(self.reasoning_content))
+	}
 }
 
 /// Deprecated Getters
@@ -86,6 +107,67 @@ impl ChatResponse {
 }
 
 // endregion: --- ChatResponse
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::adapter::AdapterKind;
+	use crate::chat::{ContentPart, ToolCall};
+
+	fn test_model_iden() -> ModelIden {
+		ModelIden::new(AdapterKind::OpenAI, "test-model")
+	}
+
+	fn test_tool_call() -> ToolCall {
+		ToolCall {
+			call_id: "call_1".to_string(),
+			fn_name: "get_weather".to_string(),
+			fn_arguments: serde_json::json!({"city": "Paris"}),
+			thought_signatures: None,
+		}
+	}
+
+	#[test]
+	fn test_assistant_message_for_tool_use_preserves_reasoning_content() {
+		let chat_res = ChatResponse {
+			content: MessageContent::from_parts(vec![
+				ContentPart::Text("Let me check.".to_string()),
+				ContentPart::ToolCall(test_tool_call()),
+			]),
+			reasoning_content: Some("I should inspect the weather tool first.".to_string()),
+			model_iden: test_model_iden(),
+			provider_model_iden: test_model_iden(),
+			usage: Usage::default(),
+			captured_raw_body: None,
+		};
+
+		let assistant_msg = chat_res
+			.assistant_message_for_tool_use()
+			.expect("assistant tool-use message should exist");
+
+		assert_eq!(assistant_msg.role.to_string(), "Assistant");
+		assert_eq!(assistant_msg.content.first_text(), Some("Let me check."));
+		assert_eq!(assistant_msg.content.tool_calls().len(), 1);
+		assert_eq!(
+			assistant_msg.content.joined_reasoning_content().as_deref(),
+			Some("I should inspect the weather tool first.")
+		);
+	}
+
+	#[test]
+	fn test_assistant_message_for_tool_use_requires_tool_calls() {
+		let chat_res = ChatResponse {
+			content: MessageContent::from_text("No tools here."),
+			reasoning_content: Some("Reasoning should not matter without tool calls.".to_string()),
+			model_iden: test_model_iden(),
+			provider_model_iden: test_model_iden(),
+			usage: Usage::default(),
+			captured_raw_body: None,
+		};
+
+		assert!(chat_res.assistant_message_for_tool_use().is_none());
+	}
+}
 
 // region:    --- ChatStreamResponse
 

@@ -962,7 +962,7 @@ pub async fn common_test_tool_full_flow_ok(model: &str) -> TestResult<()> {
 
 	// -- Exec first request to get the tool calls
 	let chat_res = client.exec_chat(model, chat_req.clone(), None).await?;
-	let tool_calls = chat_res.into_tool_calls();
+	let tool_calls = chat_res.tool_calls();
 
 	if tool_calls.is_empty() {
 		return Err("Should have tool calls in chat_res".into());
@@ -976,7 +976,7 @@ pub async fn common_test_tool_full_flow_ok(model: &str) -> TestResult<()> {
 	let tool_response = ToolResponse::new(first_tool_call_id, r#"{"weather": "Sunny", "temperature": "32C"}"#);
 
 	// Add the tool_calls, tool_response
-	let chat_req = chat_req.append_message(tool_calls).append_message(tool_response);
+	let chat_req = chat_req.append_tool_use_from_chat_response(&chat_res, tool_response);
 
 	let chat_res = client.exec_chat(model, chat_req.clone(), None).await?;
 
@@ -1038,7 +1038,10 @@ pub async fn common_test_all_models(adapter_kind: AdapterKind, expected_model_na
 
 	// -- Check
 	assert!(!models.is_empty(), "Should have at least one model");
-	println!("Available models: {:?}", models.iter().map(|m| &*m.name).collect::<Vec<_>>());
+	println!(
+		"Available models: {:?}",
+		models.iter().map(|m| &*m.name).collect::<Vec<_>>()
+	);
 
 	// Check that we can find the expected model
 	let found_model = models.iter().find(|model| &*model.name == expected_model_name);
@@ -1061,7 +1064,7 @@ pub async fn common_test_all_models(adapter_kind: AdapterKind, expected_model_na
 		"Model should support text input modality"
 	);
 
-	// Check that text is in supported output modalities  
+	// Check that text is in supported output modalities
 	assert!(
 		model.supported_output_modalities.contains(&Modality::Text),
 		"Model should support text output modality"

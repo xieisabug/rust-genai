@@ -240,27 +240,66 @@ impl StreamEnd {
 	}
 
 	/// Convenience: build an assistant message for a tool-use handoff that places
-	/// thought signatures (if any) before tool calls. Returns None if no tool calls
-	/// were captured.
-	pub fn into_assistant_message_for_tool_use(self) -> Option<ChatMessage> {
-		let content = self.captured_content?;
-		let mut thought_signatures: Vec<String> = Vec::new();
-		let mut tool_calls: Vec<ToolCall> = Vec::new();
-		for part in content.into_parts() {
-			match part {
-				ContentPart::ThoughtSignature(t) => thought_signatures.push(t),
-				ContentPart::ToolCall(tc) => tool_calls.push(tc),
-				_ => {}
-			}
-		}
-		if tool_calls.is_empty() {
+	/// the captured assistant turn back into history, preserving any extracted
+	/// reasoning content. Returns None if no tool calls were captured.
+	pub fn assistant_message_for_tool_use(&self) -> Option<ChatMessage> {
+		let content = self.captured_content.as_ref()?;
+		if !content.contains_tool_call() {
 			return None;
 		}
-		Some(
-			ChatMessage::assistant_tool_calls_with_thoughts(tool_calls, thought_signatures)
-				.with_reasoning_content(self.captured_reasoning_content),
-		)
+		Some(ChatMessage::assistant(content.clone()).with_reasoning_content(self.captured_reasoning_content.clone()))
+	}
+
+	/// Convenience: build an assistant message for a tool-use handoff that places
+	/// the captured assistant turn back into history, preserving any extracted
+	/// reasoning content. Returns None if no tool calls were captured.
+	pub fn into_assistant_message_for_tool_use(self) -> Option<ChatMessage> {
+		let content = self.captured_content?;
+		if !content.contains_tool_call() {
+			return None;
+		}
+		Some(ChatMessage::assistant(content).with_reasoning_content(self.captured_reasoning_content))
 	}
 }
 
 // endregion: --- ChatStreamEvent
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::chat::{ContentPart, ToolCall};
+
+	fn test_tool_call() -> ToolCall {
+		ToolCall {
+			call_id: "call_1".to_string(),
+			fn_name: "get_weather".to_string(),
+			fn_arguments: serde_json::json!({"city": "Paris"}),
+			thought_signatures: None,
+		}
+	}
+
+	#[test]
+	fn test_into_assistant_message_for_tool_use_preserves_text_and_reasoning() {
+		let stream_end = StreamEnd {
+			captured_usage: None,
+			captured_content: Some(MessageContent::from_parts(vec![
+				ContentPart::ThoughtSignature("sig-1".to_string()),
+				ContentPart::Text("Let me check.".to_string()),
+				ContentPart::ToolCall(test_tool_call()),
+			])),
+			captured_reasoning_content: Some("I should call the weather tool.".to_string()),
+		};
+
+		let assistant_msg = stream_end
+			.into_assistant_message_for_tool_use()
+			.expect("assistant tool-use message should exist");
+
+		assert_eq!(assistant_msg.content.first_text(), Some("Let me check."));
+		assert_eq!(assistant_msg.content.tool_calls().len(), 1);
+		assert_eq!(
+			assistant_msg.content.joined_reasoning_content().as_deref(),
+			Some("I should call the weather tool.")
+		);
+		assert_eq!(assistant_msg.content.parts()[0].as_thought_signature(), Some("sig-1"));
+	}
+}

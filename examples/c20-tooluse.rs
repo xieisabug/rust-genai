@@ -47,7 +47,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	let chat_res = client.exec_chat(MODEL, chat_req.clone(), None).await?;
 
 	// 4. Extract the tool calls from the response
-	let tool_calls = chat_res.into_tool_calls();
+	let tool_calls = chat_res.tool_calls();
 
 	if tool_calls.is_empty() {
 		return Err("Expected tool calls in the response".into());
@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	// 5. Simulate executing the function and getting a result
 	// In a real app, you would call your actual API or service here
-	let first_tool_call = &tool_calls[0];
+	let first_tool_call = tool_calls.first().ok_or("Expected tool calls in the response")?;
 	let tool_response = ToolResponse::new(
 		first_tool_call.call_id.clone(),
 		json!({
@@ -72,8 +72,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 		.to_string(),
 	);
 
-	// 6. Add both the tool calls from the model and your tool response to the chat history
-	let chat_req = chat_req.append_message(tool_calls).append_message(tool_response);
+	// 6. Add both the assistant tool-use turn and your tool response to the chat history.
+	// This preserves reasoning_content for OpenAI-compatible reasoning models.
+	let chat_req = chat_req.append_tool_use_from_chat_response(&chat_res, tool_response);
 
 	// 7. Get the final response from the model with the function results
 	println!("\n--- Getting final response with function results");

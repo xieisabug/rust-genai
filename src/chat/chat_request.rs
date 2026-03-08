@@ -1,6 +1,6 @@
 //! This module contains all the types related to a Chat Request (except ChatOptions, which has its own file).
 
-use crate::chat::{ChatMessage, ChatRole, StreamEnd, Tool, ToolCall, ToolResponse};
+use crate::chat::{ChatMessage, ChatResponse, ChatRole, StreamEnd, Tool, ToolCall, ToolResponse};
 use crate::support;
 use serde::{Deserialize, Serialize};
 
@@ -106,11 +106,9 @@ impl ChatRequest {
 	/// If neither content nor tool calls were captured, this is a no-op before appending
 	/// the provided tool response.
 	pub fn append_tool_use_from_stream_end(mut self, end: &StreamEnd, tool_response: ToolResponse) -> Self {
-		if let Some(content) = &end.captured_content {
-			// Use captured content directly (contains thoughts/text/tool calls in correct order)
-			self.messages.push(ChatMessage::assistant(content.clone()));
+		if let Some(assistant_msg) = end.assistant_message_for_tool_use() {
+			self.messages.push(assistant_msg);
 		} else if let Some(calls_ref) = end.captured_tool_calls() {
-			// Fallback: build assistant message from tool calls only
 			let calls: Vec<ToolCall> = calls_ref.into_iter().cloned().collect();
 			if !calls.is_empty() {
 				self.messages.push(ChatMessage::from(calls));
@@ -118,6 +116,18 @@ impl ChatRequest {
 		}
 
 		// Append the tool response turn
+		self.messages.push(ChatMessage::from(tool_response));
+		self
+	}
+
+	/// Append an assistant tool-use turn and the corresponding tool response based on a
+	/// non-streaming `ChatResponse`. This preserves assistant reasoning content when the
+	/// provider expects it to be echoed back in subsequent tool-use history.
+	pub fn append_tool_use_from_chat_response(mut self, response: &ChatResponse, tool_response: ToolResponse) -> Self {
+		if let Some(assistant_msg) = response.assistant_message_for_tool_use() {
+			self.messages.push(assistant_msg);
+		}
+
 		self.messages.push(ChatMessage::from(tool_response));
 		self
 	}
@@ -157,3 +167,75 @@ impl ChatRequest {
 }
 
 // endregion: --- ChatRequest
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::ModelIden;
+	use crate::adapter::AdapterKind;
+	use crate::chat::{ContentPart, MessageContent, Usage};
+
+	fn test_model_iden() -> ModelIden {
+		ModelIden::new(AdapterKind::OpenAI, "test-model")
+	}
+
+	fn test_tool_call() -> ToolCall {
+		ToolCall {
+			call_id: "call_1".to_string(),
+			fn_name: "get_weather".to_string(),
+			fn_arguments: serde_json::json!({"city": "Paris"}),
+			thought_signatures: None,
+		}
+	}
+
+	#[test]
+	fn test_append_tool_use_from_chat_response_preserves_reasoning() {
+		let chat_res = ChatResponse {
+			content: MessageContent::from_parts(vec![
+				ContentPart::Text("Let me check.".to_string()),
+				ContentPart::ToolCall(test_tool_call()),
+			]),
+			reasoning_content: Some("I should inspect the tool call first.".to_string()),
+			model_iden: test_model_iden(),
+			provider_model_iden: test_model_iden(),
+			usage: Usage::default(),
+			captured_raw_body: None,
+		};
+		let tool_response = ToolResponse::new("call_1", r#"{"weather":"Sunny"}"#);
+
+		let chat_req =
+			ChatRequest::from_user("What's the weather?").append_tool_use_from_chat_response(&chat_res, tool_response);
+
+		assert_eq!(chat_req.messages.len(), 3);
+		let assistant_msg = &chat_req.messages[1];
+		assert_eq!(
+			assistant_msg.content.joined_reasoning_content().as_deref(),
+			Some("I should inspect the tool call first.")
+		);
+		assert_eq!(assistant_msg.content.tool_calls().len(), 1);
+	}
+
+	#[test]
+	fn test_append_tool_use_from_stream_end_preserves_reasoning() {
+		let stream_end = StreamEnd {
+			captured_usage: None,
+			captured_content: Some(MessageContent::from_parts(vec![
+				ContentPart::Text("Let me check.".to_string()),
+				ContentPart::ToolCall(test_tool_call()),
+			])),
+			captured_reasoning_content: Some("I should inspect the tool call first.".to_string()),
+		};
+		let tool_response = ToolResponse::new("call_1", r#"{"weather":"Sunny"}"#);
+
+		let chat_req =
+			ChatRequest::from_user("What's the weather?").append_tool_use_from_stream_end(&stream_end, tool_response);
+
+		assert_eq!(chat_req.messages.len(), 3);
+		let assistant_msg = &chat_req.messages[1];
+		assert_eq!(
+			assistant_msg.content.joined_reasoning_content().as_deref(),
+			Some("I should inspect the tool call first.")
+		);
+		assert_eq!(assistant_msg.content.tool_calls().len(), 1);
+	}
+}

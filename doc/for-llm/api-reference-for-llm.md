@@ -136,6 +136,7 @@ Fully resolved call target.
 - `append_messages(iter)`: Adds multiple messages.
 - `with_tools(iter)`: Replaces the tool set.
 - `append_tool(tool)`: Adds a single tool definition.
+- `append_tool_use_from_chat_response(response, tool_response)`: Appends the assistant tool-use turn from a non-streaming `ChatResponse`, preserving reasoning content when present.
 - `append_tool_use_from_stream_end(end, tool_response)`: Simplifies tool-use loops by appending the assistant turn (with thoughts/tools) and the tool result.
 - `iter_systems()`: Iterator over all system content (top-level + system-role messages).
 - `join_systems()`: Concatenates all system content into one string with blank line separators.
@@ -341,6 +342,7 @@ OpenAI service tier preference for flex processing.
 - `usage`: `Usage`.
 - `captured_raw_body`: `Option<serde_json::Value>` (populated when `ChatOptions.capture_raw_body` is true).
 - **Getters**: `first_text()`, `into_first_text()`, `texts()`, `into_texts()`, `tool_calls()`, `into_tool_calls()`.
+- **Tool-use helpers**: `assistant_message_for_tool_use()` and `into_assistant_message_for_tool_use()` preserve tool calls plus reasoning content for the next request.
 
 ### `ChatStreamResponse`
 
@@ -366,7 +368,7 @@ Implements `Stream<Item = Result<ChatStreamEvent>>`.
 - `captured_content`: `Option<MessageContent>` (text, tools, thoughts; ordering: ThoughtSignature -> Text -> ToolCall).
 - `captured_reasoning_content`: Concatenated reasoning content.
 - **Getters**: `captured_first_text()`, `captured_into_first_text()`, `captured_texts()`, `into_texts()`, `captured_tool_calls()`, `captured_into_tool_calls()`, `captured_thought_signatures()`, `captured_into_thought_signatures()`.
-- `into_assistant_message_for_tool_use()`: Returns a `ChatMessage` ready for the next request in a tool-use flow.
+- **Tool-use helpers**: `assistant_message_for_tool_use()` and `into_assistant_message_for_tool_use()` return a `ChatMessage` ready for the next request in a tool-use flow, including captured reasoning content.
 
 ## Printer Utility
 
