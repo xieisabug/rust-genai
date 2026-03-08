@@ -25,6 +25,12 @@ impl WebConfig {
 		self
 	}
 
+	/// Sets the read timeout.
+	pub fn with_read_timeout(mut self, timeout: Duration) -> Self {
+		self.read_timeout = Some(timeout);
+		self
+	}
+
 	/// Sets default headers.
 	pub fn with_default_headers(mut self, headers: reqwest::header::HeaderMap) -> Self {
 		self.default_headers = Some(headers);
@@ -59,7 +65,7 @@ impl WebConfig {
 	}
 
 	/// Disables SSL certificate verification.
-	/// 
+	///
 	/// # Warning
 	/// This should only be used for debugging purposes (e.g., with Burp Suite).
 	/// Never use this in production!
@@ -89,5 +95,19 @@ impl WebConfig {
 			builder = builder.danger_accept_invalid_certs(true);
 		}
 		builder
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::WebConfig;
+	use std::time::Duration;
+
+	#[test]
+	fn with_read_timeout_sets_read_timeout() {
+		let timeout = Duration::from_secs(60);
+		let config = WebConfig::default().with_read_timeout(timeout);
+
+		assert_eq!(config.read_timeout, Some(timeout));
 	}
 }
