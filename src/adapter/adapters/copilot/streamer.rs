@@ -55,10 +55,12 @@ impl Stream for CopilotStreamer {
 						};
 						let inter_stream_end = InterStreamEnd {
 							captured_usage,
+							captured_stop_reason: self.captured_data.stop_reason.take().map(crate::chat::StopReason::from),
 							captured_text_content: self.captured_data.content.take(),
 							captured_reasoning_content: self.captured_data.reasoning_content.take(),
 							captured_tool_calls: self.captured_data.tool_calls.take(),
 							captured_thought_signatures: None,
+							captured_response_id: None,
 						};
 						return Poll::Ready(Some(Ok(InterStreamEvent::End(inter_stream_end))));
 					}
@@ -137,7 +139,8 @@ impl Stream for CopilotStreamer {
 						}
 
 						// If finish_reason is present, send end event
-						if choice.finish_reason.is_some() {
+						if let Some(finish_reason) = &choice.finish_reason {
+							self.captured_data.stop_reason = Some(finish_reason.clone());
 							self.done = true;
 							let captured_usage = if self.options.capture_usage {
 								self.captured_data.usage.take()
@@ -146,10 +149,12 @@ impl Stream for CopilotStreamer {
 							};
 							let inter_stream_end = InterStreamEnd {
 								captured_usage,
+								captured_stop_reason: self.captured_data.stop_reason.take().map(crate::chat::StopReason::from),
 								captured_text_content: self.captured_data.content.take(),
 								captured_reasoning_content: self.captured_data.reasoning_content.take(),
 								captured_tool_calls: self.captured_data.tool_calls.take(),
 								captured_thought_signatures: None,
+								captured_response_id: None,
 							};
 							return Poll::Ready(Some(Ok(InterStreamEvent::End(inter_stream_end))));
 						}

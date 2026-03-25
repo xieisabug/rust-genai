@@ -4,7 +4,7 @@ use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{
 	Binary, BinarySource, ChatOptionsSet, ChatRequest, ChatResponse, ChatResponseFormat, ChatRole, ChatStream,
 	ChatStreamResponse, CompletionTokensDetails, ContentPart, MessageContent, PromptTokensDetails, ReasoningEffort,
-	Tool, ToolCall, ToolConfig, ToolName, Usage,
+	StopReason, Tool, ToolCall, ToolConfig, ToolName, Usage,
 };
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::{WebResponse, WebStream};
@@ -45,7 +45,7 @@ fn insert_gemini_thinking_budget_value(payload: &mut Value, effort: &ReasoningEf
 		ReasoningEffort::None => None,
 		ReasoningEffort::Low | ReasoningEffort::Minimal => Some(REASONING_LOW),
 		ReasoningEffort::Medium => Some(REASONING_MEDIUM),
-		ReasoningEffort::High => Some(REASONING_HIGH),
+		ReasoningEffort::High | ReasoningEffort::Max | ReasoningEffort::XHigh => Some(REASONING_HIGH),
 		ReasoningEffort::Budget(budget) => Some(*budget),
 	};
 
@@ -233,6 +233,8 @@ impl Adapter for GeminiAdapter {
 						"low" | "minimal" => Some(ReasoningEffort::Low),
 						"medium" => Some(ReasoningEffort::Medium),
 						"high" => Some(ReasoningEffort::High),
+						"xhigh" => Some(ReasoningEffort::XHigh),
+						"max" => Some(ReasoningEffort::Max),
 						_ => None,
 					};
 					// create the model name if there was a `-..` reasoning suffix
@@ -267,7 +269,7 @@ impl Adapter for GeminiAdapter {
 					ReasoningEffort::Low | ReasoningEffort::Minimal => {
 						payload.x_insert("/generationConfig/thinkingConfig/thinkingLevel", "LOW")?;
 					}
-					ReasoningEffort::High => {
+					ReasoningEffort::High | ReasoningEffort::Max => {
 						payload.x_insert("/generationConfig/thinkingConfig/thinkingLevel", "HIGH")?;
 					}
 					// Fallback on thinkingBudget
@@ -303,17 +305,9 @@ impl Adapter for GeminiAdapter {
 
 		// -- Response Format
 		if let Some(ChatResponseFormat::JsonSpec(st_json)) = options_set.response_format() {
-			// x_insert
-			//     responseMimeType: "application/json",
-			// responseSchema: {
 			payload.x_insert("/generationConfig/responseMimeType", "application/json")?;
 			let mut schema = st_json.schema.clone();
-			schema.x_walk(|parent_map, name| {
-				if name == "additionalProperties" {
-					parent_map.remove("additionalProperties");
-				}
-				true
-			});
+			super::openapi_schema::to_openapi_schema(&mut schema);
 			payload.x_insert("/generationConfig/responseJsonSchema", schema)?;
 		}
 
@@ -355,7 +349,9 @@ impl Adapter for GeminiAdapter {
 		let GeminiChatResponse {
 			content: gemini_content,
 			usage,
+			stop_reason,
 		} = gemini_response;
+		let stop_reason = stop_reason.map(StopReason::from);
 
 		let mut thoughts: Vec<String> = Vec::new();
 		let mut reasonings: Vec<String> = Vec::new();
@@ -413,8 +409,10 @@ impl Adapter for GeminiAdapter {
 			reasoning_content: Some(reasoning_text),
 			model_iden,
 			provider_model_iden,
+			stop_reason,
 			usage,
 			captured_raw_body: None, // Set by the client exec_chat
+			response_id: None,
 		})
 	}
 
@@ -466,15 +464,33 @@ impl GeminiAdapter {
 
 		let mut content: Vec<GeminiChatContent> = Vec::new();
 
+		// Extract usage before content/parts so it is available even in
+		// usage-only tail frames (finishReason + usageMetadata but no content).
+		let usage = body.x_take::<Value>("usageMetadata").map(Self::into_usage).unwrap_or_default();
+
 		// -- Read multipart
 		let parts = match body.x_take::<Vec<Value>>("/candidates/0/content/parts") {
 			Ok(parts) => parts,
 			Err(_) => {
-				let finish_reason = body.x_remove::<String>("/candidates/finishReason").ok();
-				let usage_metadata = body.x_remove::<Value>("/usageMetadata").ok();
+				let finish_reason = body
+					.x_remove::<String>("/candidates/0/finishReason")
+					.ok()
+					.or_else(|| body.x_remove::<String>("/candidates/finishReason").ok());
+				let saw_usage_only_tail = body.get("candidates").is_some() || finish_reason.is_some();
+
+				// Gemini streaming sends a final frame with finishReason + usageMetadata
+				// but no content.parts. This is normal — return Ok with empty content.
+				if saw_usage_only_tail {
+					return Ok(GeminiChatResponse {
+						content,
+						usage,
+						stop_reason: finish_reason,
+					});
+				}
+
 				let body = json!({
 					"finishReason": finish_reason,
-					"usageMetadata": usage_metadata,
+					"usageMetadata": Value::Null,
 				});
 				return Err(Error::ChatResponse {
 					model_iden: model_iden.clone(),
@@ -483,53 +499,40 @@ impl GeminiAdapter {
 			}
 		};
 
+		let mut tool_call_counter: usize = 0;
 		for mut part in parts {
-			// -- Capture eventual thought signature
-			{
-				if let Some(thought_signature) = part
-					.x_take::<Value>("thoughtSignature")
-					.ok()
-					.and_then(|v| if let Value::String(v) = v { Some(v) } else { None })
-				{
-					content.push(GeminiChatContent::ThoughtSignature(thought_signature));
-				}
-				// Note: sometime the thought is in "thought" (undocumented, but observed in some cases or older models?)
-				//       But for Gemini 3 it is thoughtSignature. Keeping this just in case or for backward compat if it was used.
-				//       Actually, let's stick to thoughtSignature as per docs, but if we see "thought" we might want to capture it too.
-				//       Let's check for "thought" if "thoughtSignature" was not found.
-				else if let Some(thought) = part
-					.x_take::<Value>("thought")
-					.ok()
-					.and_then(|v| if let Value::Bool(v) = v { Some(v) } else { None })
-					&& thought && let Some(val) = part
-					.x_take::<Value>("text")
-					.ok()
-					.and_then(|v| if let Value::String(v) = v { Some(v) } else { None })
-				{
-					content.push(GeminiChatContent::Reasoning(val));
+			// Each Gemini response part may contain one or more of:
+			// thoughtSignature, thought+text (reasoning), functionCall, text.
+			// We extract them in priority order.
+
+			// -- Thought signature (Gemini 3+) or legacy thought boolean
+			if let Some(sig) = take_string(&mut part, "thoughtSignature") {
+				content.push(GeminiChatContent::ThoughtSignature(sig));
+			} else if take_bool(&mut part, "thought") {
+				// Legacy: `thought: true` + `text` = reasoning content
+				if let Some(reasoning) = take_string(&mut part, "text") {
+					content.push(GeminiChatContent::Reasoning(reasoning));
 				}
 			}
 
-			// -- Capture eventual function call
-			if let Ok(fn_call_value) = part.x_take::<Value>("functionCall") {
-				let tool_call = ToolCall {
-					// NOTE: Gemini does not have call_id so, use name
-					call_id: fn_call_value.x_get("name").unwrap_or("".to_string()), // TODO: Handle this, gemini does not return the call_id
-					fn_name: fn_call_value.x_get("name").unwrap_or("".to_string()),
-					fn_arguments: fn_call_value.x_get("args").unwrap_or(Value::Null),
+			// -- Function call
+			if let Ok(fc) = part.x_take::<Value>("functionCall") {
+				let fn_name: String = fc.x_get("name").unwrap_or_default();
+				// Gemini omits call_id; synthesize a unique one to avoid
+				// collisions when the same tool is called multiple times.
+				let call_id = format!("call#{}#{}", fn_name, tool_call_counter);
+				tool_call_counter += 1;
+				content.push(GeminiChatContent::ToolCall(ToolCall {
+					call_id,
+					fn_name,
+					fn_arguments: fc.x_get("args").unwrap_or(Value::Null),
 					thought_signatures: None,
-				};
-				content.push(GeminiChatContent::ToolCall(tool_call))
+				}));
 			}
 
-			// -- Capture eventual text
-			if let Some(txt_content) = part
-				.x_take::<Value>("text")
-				.ok()
-				.and_then(|v| if let Value::String(v) = v { Some(v) } else { None })
-				.map(GeminiChatContent::Text)
-			{
-				content.push(txt_content)
+			// -- Plain text
+			if let Some(text) = take_string(&mut part, "text") {
+				content.push(GeminiChatContent::Text(text));
 			}
 
 			// -- Capture eventual inlineData (Image)
@@ -543,9 +546,13 @@ impl GeminiAdapter {
 				}
 			}
 		}
-		let usage = body.x_take::<Value>("usageMetadata").map(Self::into_usage).unwrap_or_default();
+		let stop_reason: Option<String> = body.x_take("/candidates/0/finishReason").ok();
 
-		Ok(GeminiChatResponse { content, usage })
+		Ok(GeminiChatResponse {
+			content,
+			usage,
+			stop_reason,
+		})
 	}
 
 	/// See gemini doc: https://ai.google.dev/api/generate-content#UsageMetadata
@@ -825,6 +832,11 @@ impl GeminiAdapter {
 			None
 		};
 
+		// -- Post-process: merge consecutive tool-response "user" entries into a single entry.
+		// Gemini FC protocol requires all functionResponse parts to be in one "user" turn
+		// following the "model" turn with functionCall parts.
+		let contents = Self::merge_consecutive_tool_response_entries(contents);
+
 		// -- Build tools
 		let tools = if let Some(req_tools) = chat_req.tools {
 			let mut tools: Vec<Value> = Vec::new();
@@ -912,16 +924,52 @@ impl GeminiAdapter {
 		}
 		// -- otherwise, user tool
 		else {
+			let mut parameters = schema.unwrap_or(Value::Null);
+			super::openapi_schema::to_openapi_schema(&mut parameters);
+			let parameters = if parameters.is_null() { None } else { Some(parameters) };
 			Ok(GeminiTool::User(json!({
 				"name": name_str,
 				"description": description,
-				"parameters": schema,
+				"parameters": parameters,
 			})))
 		}
 	}
 }
 
-// struct Gemini
+impl GeminiAdapter {
+	/// Merge consecutive "user" entries that contain only functionResponse parts
+	/// into a single entry. Gemini requires all function responses in one turn.
+	fn merge_consecutive_tool_response_entries(contents: Vec<Value>) -> Vec<Value> {
+		fn is_tool_response_entry(entry: &Value) -> bool {
+			if entry.get("role").and_then(|r| r.as_str()) != Some("user") {
+				return false;
+			}
+			if let Some(parts) = entry.get("parts").and_then(|p| p.as_array()) {
+				!parts.is_empty() && parts.iter().all(|p| p.get("functionResponse").is_some())
+			} else {
+				false
+			}
+		}
+
+		let mut result: Vec<Value> = Vec::with_capacity(contents.len());
+		for entry in contents {
+			if is_tool_response_entry(&entry) {
+				// Check if previous entry is also a tool response — merge
+				if let Some(prev) = result.last_mut()
+					&& is_tool_response_entry(prev)
+					&& let (Some(prev_parts), Some(new_parts)) = (
+						prev.get_mut("parts").and_then(|p| p.as_array_mut()),
+						entry.get("parts").and_then(|p| p.as_array()),
+					) {
+					prev_parts.extend(new_parts.iter().cloned());
+					continue;
+				}
+			}
+			result.push(entry);
+		}
+		result
+	}
+}
 
 pub enum GeminiTool {
 	Builtin(Value),
@@ -932,6 +980,7 @@ pub enum GeminiTool {
 pub(super) struct GeminiChatResponse {
 	pub content: Vec<GeminiChatContent>,
 	pub usage: Usage,
+	pub stop_reason: Option<String>,
 }
 
 pub(super) enum GeminiChatContent {
@@ -951,4 +1000,168 @@ struct GeminiChatRequestParts {
 	tools: Option<Vec<Value>>,
 }
 
-// endregion: --- Support
+// region:    --- Helpers
+
+/// Extract and remove a string field from a JSON Value.
+fn take_string(v: &mut Value, key: &str) -> Option<String> {
+	v.as_object_mut()
+		.and_then(|m| m.remove(key))
+		.and_then(|v| if let Value::String(s) = v { Some(s) } else { None })
+}
+
+/// Extract and remove a boolean field from a JSON Value, defaulting to false.
+fn take_bool(v: &mut Value, key: &str) -> bool {
+	v.as_object_mut()
+		.and_then(|m| m.remove(key))
+		.and_then(|v| v.as_bool())
+		.unwrap_or(false)
+}
+
+// endregion: --- Helpers
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn merge_consecutive_tool_responses() {
+		let contents = vec![
+			json!({"role": "model", "parts": [{"functionCall": {"name": "read", "args": {}}}]}),
+			json!({"role": "user", "parts": [{"functionResponse": {"name": "call1", "response": {"content": "a"}}}]}),
+			json!({"role": "user", "parts": [{"functionResponse": {"name": "call2", "response": {"content": "b"}}}]}),
+		];
+		let merged = GeminiAdapter::merge_consecutive_tool_response_entries(contents);
+		assert_eq!(merged.len(), 2); // model + single merged user
+		let parts = merged[1].get("parts").unwrap().as_array().unwrap();
+		assert_eq!(parts.len(), 2); // both functionResponse in one entry
+	}
+
+	#[test]
+	fn merge_does_not_merge_non_tool_user_entries() {
+		let contents = vec![
+			json!({"role": "user", "parts": [{"text": "hello"}]}),
+			json!({"role": "user", "parts": [{"functionResponse": {"name": "c1", "response": {"content": "x"}}}]}),
+		];
+		let merged = GeminiAdapter::merge_consecutive_tool_response_entries(contents);
+		assert_eq!(merged.len(), 2); // not merged — first is text, not tool response
+	}
+
+	#[test]
+	fn merge_three_consecutive_tool_responses() {
+		let contents = vec![
+			json!({"role": "user", "parts": [{"functionResponse": {"name": "c1", "response": {"content": "a"}}}]}),
+			json!({"role": "user", "parts": [{"functionResponse": {"name": "c2", "response": {"content": "b"}}}]}),
+			json!({"role": "user", "parts": [{"functionResponse": {"name": "c3", "response": {"content": "c"}}}]}),
+		];
+		let merged = GeminiAdapter::merge_consecutive_tool_response_entries(contents);
+		assert_eq!(merged.len(), 1);
+		let parts = merged[0].get("parts").unwrap().as_array().unwrap();
+		assert_eq!(parts.len(), 3);
+	}
+
+	#[test]
+	fn tool_call_id_uses_counter() {
+		// Simulate Gemini response with two functionCalls for the same tool
+		let body = json!({
+			"candidates": [{
+				"content": {
+					"role": "model",
+					"parts": [
+						{"functionCall": {"name": "read_file", "args": {"path": "a.rs"}}},
+						{"functionCall": {"name": "read_file", "args": {"path": "b.rs"}}}
+					]
+				}
+			}],
+			"usageMetadata": {"totalTokenCount": 100}
+		});
+		let model_iden = ModelIden::new(AdapterKind::Gemini, "gemini-test");
+		let response = GeminiAdapter::body_to_gemini_chat_response(&model_iden, body).unwrap();
+		let tool_calls: Vec<_> = response
+			.content
+			.into_iter()
+			.filter_map(|c| {
+				if let GeminiChatContent::ToolCall(tc) = c {
+					Some(tc)
+				} else {
+					None
+				}
+			})
+			.collect();
+		assert_eq!(tool_calls.len(), 2);
+		assert_ne!(tool_calls[0].call_id, tool_calls[1].call_id);
+		assert!(tool_calls[0].call_id.contains("read_file"));
+		assert!(tool_calls[1].call_id.contains("read_file"));
+	}
+
+	#[test]
+	fn body_to_gemini_chat_response_accepts_usage_only_stream_tail() {
+		let model_iden = ModelIden::new(AdapterKind::Gemini, "gemini-2.5-flash");
+		let response = GeminiAdapter::body_to_gemini_chat_response(
+			&model_iden,
+			json!({
+				"candidates": [
+					{
+						"finishReason": "STOP"
+					}
+				],
+				"usageMetadata": {
+					"promptTokenCount": 10,
+					"candidatesTokenCount": 4,
+					"totalTokenCount": 14
+				}
+			}),
+		)
+		.expect("usage-only stream tail should not be treated as an error");
+
+		assert!(response.content.is_empty());
+		assert_eq!(response.usage.total_tokens, Some(14));
+		assert_eq!(response.usage.prompt_tokens, Some(10));
+		assert_eq!(response.usage.completion_tokens, Some(4));
+		assert_eq!(response.stop_reason.as_deref(), Some("STOP"));
+	}
+
+	#[test]
+	fn body_to_gemini_chat_response_accepts_tail_with_null_finish_reason() {
+		let model_iden = ModelIden::new(AdapterKind::Gemini, "gemini-2.5-flash");
+		let response = GeminiAdapter::body_to_gemini_chat_response(
+			&model_iden,
+			json!({
+				"candidates": [
+					{
+						"finishReason": null
+					}
+				],
+				"usageMetadata": {
+					"promptTokenCount": 10,
+					"candidatesTokenCount": 4,
+					"totalTokenCount": 14
+				}
+			}),
+		)
+		.expect("usage-only stream tail with null finishReason should not be an error");
+
+		assert!(response.content.is_empty());
+		assert_eq!(response.usage.total_tokens, Some(14));
+	}
+
+	#[test]
+	fn body_to_gemini_chat_response_still_rejects_missing_candidates() {
+		let model_iden = ModelIden::new(AdapterKind::Gemini, "gemini-2.5-flash");
+		let result = GeminiAdapter::body_to_gemini_chat_response(
+			&model_iden,
+			json!({
+				"usageMetadata": {
+					"promptTokenCount": 10,
+					"candidatesTokenCount": 4,
+					"totalTokenCount": 14
+				}
+			}),
+		);
+
+		let err = match result {
+			Err(e) => e,
+			Ok(_) => panic!("missing candidates should still be rejected"),
+		};
+		assert!(matches!(err, Error::ChatResponse { .. }));
+	}
+}

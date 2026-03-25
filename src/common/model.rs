@@ -278,6 +278,8 @@ impl ReasoningEffortType {
 			ReasoningEffort::Low => ReasoningEffortType::Low,
 			ReasoningEffort::Medium => ReasoningEffortType::Medium,
 			ReasoningEffort::High => ReasoningEffortType::High,
+			ReasoningEffort::XHigh => ReasoningEffortType::High,
+			ReasoningEffort::Max => ReasoningEffortType::High,
 			ReasoningEffort::Budget(_) => ReasoningEffortType::Budget,
 		}
 	}

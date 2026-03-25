@@ -1,5 +1,5 @@
 use crate::adapter::inter_stream::{InterStreamEnd, InterStreamEvent};
-use crate::chat::{ChatMessage, ContentPart, MessageContent, ToolCall, Usage};
+use crate::chat::{ChatMessage, ContentPart, MessageContent, StopReason, ToolCall, Usage};
 use futures::Stream;
 use serde::{Deserialize, Serialize};
 use std::pin::Pin;
@@ -107,6 +107,9 @@ pub struct StreamEnd {
 	/// Captured usage if `ChatOptions.capture_usage` is enabled.
 	pub captured_usage: Option<Usage>,
 
+	/// Normalised stop reason captured at stream end (see [`StopReason`]).
+	pub captured_stop_reason: Option<StopReason>,
+
 	/// Captured final content (text and tool calls) if `ChatOptions.capture_content`
 	/// or `capture_tool_calls` is enabled.
 	/// Note: Since 0.4.0 this includes tool calls as well (for API symmetry with `ChatResponse`);
@@ -115,6 +118,9 @@ pub struct StreamEnd {
 
 	/// Captured reasoning content if `ChatOptions.capture_reasoning` is enabled.
 	pub captured_reasoning_content: Option<String>,
+
+	/// Response ID for stateful sessions (OpenAI Responses API).
+	pub captured_response_id: Option<String>,
 }
 
 impl From<InterStreamEnd> for StreamEnd {
@@ -169,8 +175,10 @@ impl From<InterStreamEnd> for StreamEnd {
 		// -- Return result
 		StreamEnd {
 			captured_usage: inter_end.captured_usage,
+			captured_stop_reason: inter_end.captured_stop_reason,
 			captured_content,
 			captured_reasoning_content: inter_end.captured_reasoning_content,
+			captured_response_id: inter_end.captured_response_id,
 		}
 	}
 }
@@ -282,12 +290,14 @@ mod tests {
 	fn test_into_assistant_message_for_tool_use_preserves_text_and_reasoning() {
 		let stream_end = StreamEnd {
 			captured_usage: None,
+			captured_stop_reason: None,
 			captured_content: Some(MessageContent::from_parts(vec![
 				ContentPart::ThoughtSignature("sig-1".to_string()),
 				ContentPart::Text("Let me check.".to_string()),
 				ContentPart::ToolCall(test_tool_call()),
 			])),
 			captured_reasoning_content: Some("I should call the weather tool.".to_string()),
+			captured_response_id: None,
 		};
 
 		let assistant_msg = stream_end
@@ -301,5 +311,18 @@ mod tests {
 			Some("I should call the weather tool.")
 		);
 		assert_eq!(assistant_msg.content.parts()[0].as_thought_signature(), Some("sig-1"));
+	}
+
+	#[test]
+	fn test_stream_end_preserves_captured_stop_reason() {
+		let inter_end = InterStreamEnd {
+			captured_stop_reason: Some(StopReason::Completed("stop".to_string())),
+			..Default::default()
+		};
+		let stream_end = StreamEnd::from(inter_end);
+		assert_eq!(
+			stream_end.captured_stop_reason,
+			Some(StopReason::Completed("stop".to_string()))
+		);
 	}
 }

@@ -441,13 +441,21 @@ impl Adapter for CopilotAdapter {
 			}
 		}
 
+		let stop_reason = copilot_response
+			.choices
+			.first()
+			.and_then(|choice| choice.finish_reason.clone())
+			.map(crate::chat::StopReason::from);
+
 		Ok(ChatResponse {
 			content,
 			reasoning_content: None,
 			model_iden,
 			provider_model_iden,
+			stop_reason,
 			usage: usage.unwrap_or_default(),
 			captured_raw_body,
+			response_id: None,
 		})
 	}
 

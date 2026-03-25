@@ -4,8 +4,8 @@ use crate::adapter::openai_resp::OpenAIRespStreamer;
 use crate::adapter::openai_resp::resp_types::RespResponse;
 use crate::adapter::{Adapter, AdapterDispatcher, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{
-	ChatOptionsSet, ChatRequest, ChatResponse, ChatResponseFormat, ChatRole, ChatStream, ChatStreamResponse,
-	ContentPart, MessageContent, ReasoningEffort, Tool, ToolConfig, ToolName, Usage,
+	CacheControl, ChatOptionsSet, ChatRequest, ChatResponse, ChatResponseFormat, ChatRole, ChatStream,
+	ChatStreamResponse, ContentPart, MessageContent, ReasoningEffort, StopReason, Tool, ToolConfig, ToolName, Usage,
 };
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::{EventSourceStream, WebResponse};
@@ -120,19 +120,53 @@ impl Adapter for OpenAIRespAdapter {
 				(None, model_name)
 			};
 
+		// -- Extract system prompt before consuming chat_req.
+		// Use the Responses API `instructions` field instead of an input system message.
+		// `instructions` is the canonical way to set system prompt in the Responses API:
+		// - It overrides on each call (important for stateful sessions with previous_response_id)
+		// - It separates instructions from conversation items
+		// - Inline system messages (ChatRole::System in messages) still go to input as-is
+		let instructions = chat_req.system.clone();
+		let mut chat_req = chat_req;
+		chat_req.system = None;
+
+		// -- Extract stateful session fields before consuming chat_req
+		let previous_response_id = chat_req.previous_response_id.clone();
+		let explicit_store = chat_req.store;
+
 		// -- Build the basic payload
 		let OpenAIRespRequestParts {
 			input_items: messages,
 			tools,
 		} = Self::into_openai_request_parts(&model, chat_req)?;
 
-		// IMPORTANT: `store = false` - To maintain consistent behavior with other chat completions, store is set to false
+		// Store: always opt-in. If not explicitly set, default is false.
+		// Privacy first: we never implicitly set store=true, even when previous_response_id is set.
+		// If previous_response_id is set without store=true, log a warning — the caller must be explicit.
+		let store = explicit_store.unwrap_or(false);
+		if previous_response_id.is_some() && explicit_store != Some(true) {
+			tracing::warn!(
+				"previous_response_id is set but store is not explicitly true — \
+				 stateful session requires store=true to work. Set `store: Some(true)` explicitly."
+			);
+		}
+
 		let mut payload = json!({
-			"store": false,
+			"store": store,
 			"model": model_name,
 			"input": messages,
 			"stream": stream,
 		});
+
+		// -- System prompt as instructions
+		if let Some(instructions) = &instructions {
+			payload.x_insert("instructions", instructions.as_str())?;
+		}
+
+		// -- Stateful session: add previous_response_id
+		if let Some(prev_id) = &previous_response_id {
+			payload.x_insert("previous_response_id", prev_id.as_str())?;
+		}
 
 		// -- Set reasoning effort
 		if let Some(reasoning_effort) = reasoning_effort
@@ -205,13 +239,28 @@ impl Adapter for OpenAIRespAdapter {
 		}
 
 		if let Some(max_tokens) = chat_options.max_tokens() {
-			payload.x_insert("max_tokens", max_tokens)?;
+			payload.x_insert("max_output_tokens", max_tokens)?;
 		}
 		if let Some(top_p) = chat_options.top_p() {
 			payload.x_insert("top_p", top_p)?;
 		}
 		if let Some(seed) = chat_options.seed() {
 			payload.x_insert("seed", seed)?;
+		}
+
+		// -- OpenAI prompt cache options
+		if let Some(prompt_cache_key) = chat_options.prompt_cache_key() {
+			payload.x_insert("prompt_cache_key", prompt_cache_key)?;
+		}
+		if let Some(cache_control) = chat_options.cache_control() {
+			let prompt_cache_retention = match cache_control {
+				CacheControl::Memory | CacheControl::Ephemeral => Some("in_memory"),
+				CacheControl::Ephemeral24h => Some("24h"),
+				CacheControl::Ephemeral5m | CacheControl::Ephemeral1h => None,
+			};
+			if let Some(prompt_cache_retention) = prompt_cache_retention {
+				payload.x_insert("prompt_cache_retention", prompt_cache_retention)?;
+			}
 		}
 
 		Ok(WebRequestData { url, headers, payload })
@@ -249,8 +298,10 @@ impl Adapter for OpenAIRespAdapter {
 			reasoning_content,
 			model_iden,
 			provider_model_iden,
+			stop_reason: Some(StopReason::from(resp.status)),
 			usage,
 			captured_raw_body,
+			response_id: Some(resp.id),
 		})
 	}
 

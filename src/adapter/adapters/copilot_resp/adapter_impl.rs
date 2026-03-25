@@ -519,8 +519,10 @@ impl Adapter for CopilotRespAdapter {
 			reasoning_content,
 			model_iden,
 			provider_model_iden,
+			stop_reason: Some(crate::chat::StopReason::from(resp.status.clone())),
 			usage,
 			captured_raw_body,
+			response_id: Some(resp.id),
 		})
 	}
 
