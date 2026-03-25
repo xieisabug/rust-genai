@@ -19,6 +19,16 @@ pub struct CopilotAdapter;
 const MODELS: &[&str] = &[
 	"gpt-4o",
 	"gpt-4o-mini",
+	"gpt-5-mini",
+	"gpt-5.1",
+	"gpt-5.1-codex",
+	"gpt-5.1-codex-mini",
+	"gpt-5.1-codex-max",
+	"gpt-5.2",
+	"gpt-5.2-codex",
+	"gpt-5.3-codex",
+	"gpt-5.4",
+	"gpt-5.4-mini",
 	"claude-3.5-sonnet",
 	"o1-mini",
 	"o1-preview",
@@ -34,7 +44,7 @@ impl CopilotAdapter {
 
 		let model_id: String = model_data.x_take("id")?;
 		let _display_name: String = model_data.x_take("name").unwrap_or_else(|_| model_id.clone());
-		
+
 		let model_name: crate::ModelName = model_id.clone().into();
 		let mut model = Model::new(model_name, model_id.clone());
 
@@ -238,10 +248,14 @@ impl Adapter for CopilotAdapter {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 
-	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
+	async fn all_models(
+		kind: AdapterKind,
+		target: ServiceTarget,
+		web_client: &crate::webc::WebClient,
+	) -> Result<Vec<Model>> {
 		use crate::adapter::adapters::support::get_api_key;
 		use value_ext::JsonValueExt;
-		
+
 		let auth = target.auth;
 		let endpoint = target.endpoint;
 
@@ -302,7 +316,7 @@ impl Adapter for CopilotAdapter {
 				return Err(Error::AdapterNotSupported {
 					adapter_kind: AdapterKind::Copilot,
 					feature: "embed".to_string(),
-				})
+				});
 			}
 			ServiceType::Models => "/models",
 		};
@@ -326,14 +340,12 @@ impl Adapter for CopilotAdapter {
 		let url = Self::get_service_url(&model, service_type, target.endpoint)?;
 
 		// Detect if request contains image content (vision)
-		let has_vision = chat_req
-			.messages
-			.iter()
-			.any(|m| m
-				.content
+		let has_vision = chat_req.messages.iter().any(|m| {
+			m.content
 				.parts()
 				.iter()
-				.any(|p| matches!(p, ContentPart::Binary(b) if b.is_image())));
+				.any(|p| matches!(p, ContentPart::Binary(b) if b.is_image()))
+		});
 
 		let stream = matches!(service_type, ServiceType::ChatStream);
 		let mut copilot_req = Self::to_copilot_request(chat_req, stream, model_name)?;
@@ -377,16 +389,21 @@ impl Adapter for CopilotAdapter {
 		let WebResponse { body, .. } = web_response;
 
 		// Debug: print raw response body
-		eprintln!("[DEBUG Copilot] Raw response body: {}", serde_json::to_string_pretty(&body).unwrap_or_default());
+		eprintln!(
+			"[DEBUG Copilot] Raw response body: {}",
+			serde_json::to_string_pretty(&body).unwrap_or_default()
+		);
 
-		let captured_raw_body = options_set
-			.capture_raw_body()
-			.unwrap_or_default()
-			.then(|| body.clone());
+		let captured_raw_body = options_set.capture_raw_body().unwrap_or_default().then(|| body.clone());
 
 		// Parse Copilot response
-		let copilot_response: CopilotChatResponse = serde_json::from_value(body.clone())
-			.map_err(|e| Error::Internal(format!("Failed to parse Copilot response: {}. Body: {}", e, serde_json::to_string_pretty(&body).unwrap_or_default())))?;
+		let copilot_response: CopilotChatResponse = serde_json::from_value(body.clone()).map_err(|e| {
+			Error::Internal(format!(
+				"Failed to parse Copilot response: {}. Body: {}",
+				e,
+				serde_json::to_string_pretty(&body).unwrap_or_default()
+			))
+		})?;
 
 		let provider_model_name = copilot_response.model.clone();
 		let provider_model_iden = model_iden.from_optional_name(provider_model_name);
@@ -440,7 +457,7 @@ impl Adapter for CopilotAdapter {
 		options_set: ChatOptionsSet<'_, '_>,
 	) -> Result<ChatStreamResponse> {
 		use crate::chat::ChatStream;
-		
+
 		let event_source = EventSourceStream::new(reqwest_builder);
 		let streamer = CopilotStreamer::new(event_source, model_iden.clone(), options_set);
 		let chat_stream = ChatStream::from_inter_stream(streamer);

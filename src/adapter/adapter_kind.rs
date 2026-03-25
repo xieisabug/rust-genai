@@ -1,3 +1,4 @@
+use crate::adapter::adapters::copilot_resp::CopilotRespAdapter;
 use crate::adapter::adapters::ollama::OllamaAdapter;
 use crate::adapter::adapters::openai_resp::OpenAIRespAdapter;
 use crate::adapter::adapters::together::TogetherAdapter;
@@ -56,6 +57,8 @@ pub enum AdapterKind {
 	Cohere,
 	/// GitHub Copilot Chat (uses its own protocol with OAuth authentication)
 	Copilot,
+	/// GitHub Copilot explicit routing alias, reusing Copilot's chat/completions transport.
+	CopilotResp,
 	/// OpenAI shared behavior + some custom. (currently, localhost only, can be customize with ServerTargetResolver).
 	Ollama,
 }
@@ -81,6 +84,7 @@ impl AdapterKind {
 			AdapterKind::Aliyun => "Aliyun",
 			AdapterKind::Cohere => "Cohere",
 			AdapterKind::Copilot => "Copilot",
+			AdapterKind::CopilotResp => "CopilotResp",
 			AdapterKind::Ollama => "Ollama",
 		}
 	}
@@ -104,6 +108,7 @@ impl AdapterKind {
 			AdapterKind::Aliyun => "aliyun",
 			AdapterKind::Cohere => "cohere",
 			AdapterKind::Copilot => "copilot",
+			AdapterKind::CopilotResp => "copilot_resp",
 			AdapterKind::Ollama => "ollama",
 		}
 	}
@@ -126,6 +131,7 @@ impl AdapterKind {
 			"aliyun" => Some(AdapterKind::Aliyun),
 			"cohere" => Some(AdapterKind::Cohere),
 			"copilot" => Some(AdapterKind::Copilot),
+			"copilot_resp" => Some(AdapterKind::CopilotResp),
 			"ollama" => Some(AdapterKind::Ollama),
 			_ => None,
 		}
@@ -153,6 +159,7 @@ impl AdapterKind {
 			AdapterKind::Aliyun => AliyunAdapter::DEFAULT_API_KEY_ENV_NAME,
 			AdapterKind::Cohere => CohereAdapter::DEFAULT_API_KEY_ENV_NAME,
 			AdapterKind::Copilot => None,
+			AdapterKind::CopilotResp => CopilotRespAdapter::DEFAULT_API_KEY_ENV_NAME,
 			AdapterKind::Ollama => OllamaAdapter::DEFAULT_API_KEY_ENV_NAME,
 		}
 	}
@@ -247,8 +254,7 @@ impl AdapterKind {
 		// -- Second, custom, for now, we harcode this exceptin here (might become more generic later)
 		else if namespace == "github_copilot" {
 			Some(Self::Copilot)
-		}
-		else if namespace == zai::ZAI_CODING_NAMESPACE {
+		} else if namespace == zai::ZAI_CODING_NAMESPACE {
 			Some(Self::Zai)
 		}
 		//
@@ -260,3 +266,14 @@ impl AdapterKind {
 }
 
 // endregion: --- Support
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn test_namespaced_copilot_resp_model_maps_to_copilot_resp_adapter() {
+		let adapter = AdapterKind::from_model("copilot_resp::gpt-4o").expect("namespaced model should resolve");
+		assert_eq!(adapter, AdapterKind::CopilotResp);
+	}
+}

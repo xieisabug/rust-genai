@@ -5,6 +5,7 @@ pub(super) mod anthropic;
 pub(super) mod bigmodel;
 pub(super) mod cohere;
 pub(super) mod copilot;
+pub(super) mod copilot_resp;
 pub(super) mod deepseek;
 pub(super) mod fireworks;
 pub(super) mod gemini;
