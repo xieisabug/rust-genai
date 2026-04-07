@@ -1,5 +1,6 @@
 use crate::adapter::ModelCapabilities;
 use crate::adapter::adapters::copilot::CopilotAdapter;
+use crate::adapter::adapters::copilot_headers::build_copilot_headers;
 use crate::adapter::adapters::support::get_api_key;
 use crate::adapter::openai_resp::OpenAIRespAdapter;
 use crate::adapter::openai_resp::OpenAIRespStreamer;
@@ -12,10 +13,11 @@ use crate::chat::{
 use crate::embed::{EmbedOptionsSet, EmbedRequest, EmbedResponse};
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::{EventSourceStream, WebClient, WebResponse};
-use crate::{Error, Headers, Model, ModelIden, Result, ServiceTarget};
+use crate::{Error, Model, ModelIden, Result, ServiceTarget};
+#[cfg(test)]
+use crate::Headers;
 use reqwest::RequestBuilder;
 use serde_json::{Map, Value, json};
-use uuid::Uuid;
 use value_ext::JsonValueExt;
 
 /// GitHub Copilot Responses adapter.
@@ -28,74 +30,6 @@ pub struct CopilotRespAdapter;
 
 impl CopilotRespAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = CopilotAdapter::API_KEY_DEFAULT_ENV_NAME;
-	const X_GITHUB_API_VERSION: &str = "2025-04-01";
-	const EDITOR_VERSION: &str = "vscode/1.95.0";
-	const EDITOR_PLUGIN_VERSION: &str = "copilot-chat/0.26.7";
-	const USER_AGENT: &str = "GitHubCopilotChat/0.26.7";
-	const OPENAI_INTENT: &str = "conversation-panel";
-
-	fn build_headers(api_key: &str, input_items: &[Value]) -> Headers {
-		let mut headers = vec![
-			("Authorization".to_string(), format!("Bearer {api_key}")),
-			("content-type".to_string(), "application/json".to_string()),
-			("copilot-integration-id".to_string(), "vscode-chat".to_string()),
-			("editor-version".to_string(), Self::EDITOR_VERSION.to_string()),
-			(
-				"editor-plugin-version".to_string(),
-				Self::EDITOR_PLUGIN_VERSION.to_string(),
-			),
-			("user-agent".to_string(), Self::USER_AGENT.to_string()),
-			("openai-intent".to_string(), Self::OPENAI_INTENT.to_string()),
-			(
-				"x-github-api-version".to_string(),
-				Self::X_GITHUB_API_VERSION.to_string(),
-			),
-			("x-request-id".to_string(), Uuid::new_v4().to_string()),
-			(
-				"x-vscode-user-agent-library-version".to_string(),
-				"electron-fetch".to_string(),
-			),
-			(
-				"X-Initiator".to_string(),
-				Self::infer_initiator(input_items).to_string(),
-			),
-		];
-
-		if input_items.iter().any(Self::contains_vision_input) {
-			headers.push(("copilot-vision-request".to_string(), "true".to_string()));
-		}
-
-		Headers::from(headers)
-	}
-
-	fn infer_initiator(input_items: &[Value]) -> &'static str {
-		if input_items.iter().any(|item| {
-			let role = item.get("role").and_then(Value::as_str);
-			role.is_none() || role.is_some_and(|role| role.eq_ignore_ascii_case("assistant"))
-		}) {
-			"agent"
-		} else {
-			"user"
-		}
-	}
-
-	fn contains_vision_input(value: &Value) -> bool {
-		match value {
-			Value::Array(values) => values.iter().any(Self::contains_vision_input),
-			Value::Object(map) => {
-				if map
-					.get("type")
-					.and_then(Value::as_str)
-					.is_some_and(|typ| typ.eq_ignore_ascii_case("input_image"))
-				{
-					return true;
-				}
-
-				map.values().any(Self::contains_vision_input)
-			}
-			_ => false,
-		}
-	}
 
 	fn into_copilot_resp_request_parts(
 		_model_iden: &ModelIden,
@@ -496,8 +430,8 @@ impl Adapter for CopilotRespAdapter {
 			payload.x_insert("seed", seed)?;
 		}
 
-		let input_items = payload.get("input").and_then(Value::as_array).cloned().unwrap_or_default();
-		let headers = Self::build_headers(&api_key, &input_items);
+		let mut headers = build_copilot_headers(&api_key, &payload, true);
+		headers.merge(("x-vscode-user-agent-library-version", "electron-fetch"));
 
 		Ok(WebRequestData { url, headers, payload })
 	}
@@ -572,6 +506,7 @@ struct CopilotRespRequestParts {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::adapter::adapters::copilot_headers::OPENAI_INTENT;
 	use crate::chat::{ChatMessage, ToolCall};
 	use reqwest::StatusCode;
 
@@ -617,7 +552,7 @@ mod tests {
 		assert!(request.url.ends_with("/responses"));
 		assert_eq!(
 			header_value(&request.headers, "openai-intent").as_deref(),
-			Some(CopilotRespAdapter::OPENAI_INTENT)
+			Some(OPENAI_INTENT)
 		);
 		assert_eq!(
 			header_value(&request.headers, "copilot-integration-id").as_deref(),
@@ -664,6 +599,27 @@ mod tests {
 
 		assert!(input.iter().any(|item| item == &reasoning_item));
 		assert_eq!(header_value(&request.headers, "X-Initiator").as_deref(), Some("agent"));
+	}
+
+	#[test]
+	fn test_copilot_resp_adds_vision_header_from_input_payload() {
+		let chat_req = ChatRequest::from_messages(vec![ChatMessage::user(MessageContent::from_parts(vec![
+			ContentPart::from_text("Describe this image."),
+			ContentPart::from_binary_url("image/png", "https://example.com/cat.png", None),
+		]))]);
+
+		let request = CopilotRespAdapter::to_web_request_data(
+			test_target("gpt-5.4"),
+			ServiceType::Chat,
+			chat_req,
+			ChatOptionsSet::default(),
+		)
+		.expect("request should build");
+
+		assert_eq!(
+			header_value(&request.headers, "Copilot-Vision-Request").as_deref(),
+			Some("true")
+		);
 	}
 
 	#[test]

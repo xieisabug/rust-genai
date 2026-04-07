@@ -2,6 +2,9 @@
 
 use super::streamer::CopilotStreamer;
 use super::types::*;
+use crate::adapter::adapters::copilot_headers::{
+	COPILOT_INTEGRATION_ID, EDITOR_VERSION, X_GITHUB_API_VERSION, build_copilot_headers,
+};
 use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{
 	ChatOptionsSet, ChatRequest, ChatResponse, ChatRole, ChatStreamResponse, ContentPart, MessageContent, ToolCall,
@@ -36,6 +39,15 @@ const MODELS: &[&str] = &[
 
 impl CopilotAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "COPILOT_API_TOKEN";
+	const DEFAULT_CHAT_ENDPOINT: &str = "https://api.githubcopilot.com";
+	const PUBLIC_MODELS_ENDPOINT: &str = "https://api.githubcopilot.com";
+
+	fn should_include_model(model_data: &serde_json::Value) -> bool {
+		model_data
+			.get("model_picker_enabled")
+			.and_then(serde_json::Value::as_bool)
+			.unwrap_or(true)
+	}
 
 	/// Parse Copilot API model data to unified Model structure
 	/// Reference: Zed's copilot_chat.rs Model deserialization
@@ -240,8 +252,8 @@ impl Adapter for CopilotAdapter {
 	}
 
 	fn default_endpoint() -> Endpoint {
-		// The actual endpoint is determined from the API token response
-		Endpoint::from_owned("https://api.individual.githubcopilot.com".to_string())
+		// Align with OpenCode for GitHub.com Copilot traffic.
+		Endpoint::from_static(Self::DEFAULT_CHAT_ENDPOINT)
 	}
 
 	async fn all_model_names(_kind: AdapterKind, _endpoint: Endpoint, _auth: AuthData) -> Result<Vec<String>> {
@@ -272,9 +284,9 @@ impl Adapter for CopilotAdapter {
 		let headers = Headers::from(vec![
 			("Authorization".to_string(), format!("Bearer {}", api_token)),
 			("Content-Type".to_string(), "application/json".to_string()),
-			("Copilot-Integration-Id".to_string(), "vscode-chat".to_string()),
-			("Editor-Version".to_string(), "vscode/1.103.2".to_string()),
-			("x-github-api-version".to_string(), "2025-05-01".to_string()),
+			("Copilot-Integration-Id".to_string(), COPILOT_INTEGRATION_ID.to_string()),
+			("Editor-Version".to_string(), EDITOR_VERSION.to_string()),
+			("x-github-api-version".to_string(), X_GITHUB_API_VERSION.to_string()),
 		]);
 
 		// Use the passed WebClient to send request
@@ -293,6 +305,9 @@ impl Adapter for CopilotAdapter {
 
 		if let Ok(serde_json::Value::Array(models_data)) = web_response.body.x_take("data") {
 			for model_data in models_data {
+				if !Self::should_include_model(&model_data) {
+					continue;
+				}
 				match Self::parse_copilot_model(model_data) {
 					Ok(model) => models.push(model),
 					Err(e) => {
@@ -307,9 +322,6 @@ impl Adapter for CopilotAdapter {
 	}
 
 	fn get_service_url(_model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
-		// For Copilot, we need to use the endpoint from the API token
-		let base_url = endpoint.base_url();
-
 		let suffix = match service_type {
 			ServiceType::Chat | ServiceType::ChatStream => "/chat/completions",
 			ServiceType::Embed => {
@@ -319,6 +331,17 @@ impl Adapter for CopilotAdapter {
 				});
 			}
 			ServiceType::Models => "/models",
+		};
+
+		let base_url = if matches!(service_type, ServiceType::Models)
+			&& endpoint
+				.base_url()
+				.to_ascii_lowercase()
+				.contains("individual.githubcopilot.com")
+		{
+			Self::PUBLIC_MODELS_ENDPOINT
+		} else {
+			endpoint.base_url()
 		};
 
 		Ok(format!("{}{}", base_url, suffix))
@@ -338,15 +361,6 @@ impl Adapter for CopilotAdapter {
 		// For now, we create a placeholder that will be replaced by the client
 
 		let url = Self::get_service_url(&model, service_type, target.endpoint)?;
-
-		// Detect if request contains image content (vision)
-		let has_vision = chat_req.messages.iter().any(|m| {
-			m.content
-				.parts()
-				.iter()
-				.any(|p| matches!(p, ContentPart::Binary(b) if b.is_image()))
-		});
-
 		let stream = matches!(service_type, ServiceType::ChatStream);
 		let mut copilot_req = Self::to_copilot_request(chat_req, stream, model_name)?;
 
@@ -364,19 +378,8 @@ impl Adapter for CopilotAdapter {
 		let payload = serde_json::to_value(copilot_req)
 			.map_err(|e| Error::Internal(format!("Failed to serialize Copilot request: {}", e)))?;
 
-		// Headers - align with Zed's stream_completion
 		let api_key = get_api_key(auth, &model)?;
-		let mut headers_vec = vec![
-			("Authorization".to_string(), format!("Bearer {}", api_key)),
-			("Content-Type".to_string(), "application/json".to_string()),
-			("Copilot-Integration-Id".to_string(), "vscode-chat".to_string()),
-			("Editor-Version".to_string(), "vscode/1.103.2".to_string()),
-			("X-Initiator".to_string(), "user".to_string()),
-		];
-		if has_vision {
-			headers_vec.push(("Copilot-Vision-Request".to_string(), "true".to_string()));
-		}
-		let headers = Headers::from(headers_vec);
+		let headers = build_copilot_headers(&api_key, &payload, true);
 
 		Ok(WebRequestData { url, headers, payload })
 	}
@@ -496,5 +499,154 @@ impl Adapter for CopilotAdapter {
 			adapter_kind: AdapterKind::Copilot,
 			feature: "embed".to_string(),
 		})
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+	use crate::adapter::adapters::copilot_headers::{
+		EDITOR_PLUGIN_VERSION, OPENAI_INTENT, USER_AGENT, X_GITHUB_API_VERSION,
+	};
+	use crate::chat::{ChatMessage, ToolResponse};
+
+	fn test_target(model: &str) -> ServiceTarget {
+		ServiceTarget {
+			endpoint: CopilotAdapter::default_endpoint(),
+			auth: AuthData::from_single("test-api-key"),
+			model: ModelIden::new(AdapterKind::Copilot, model),
+		}
+	}
+
+	fn header_value(headers: &Headers, name: &str) -> Option<String> {
+		headers
+			.iter()
+			.find(|(key, _)| key.eq_ignore_ascii_case(name))
+			.map(|(_, value)| value.clone())
+	}
+
+	fn test_tool_call() -> ToolCall {
+		ToolCall {
+			call_id: "call_1".to_string(),
+			fn_name: "lookup_weather".to_string(),
+			fn_arguments: serde_json::json!({"city": "Paris"}),
+			thought_signatures: None,
+		}
+	}
+
+	#[test]
+	fn test_copilot_adds_user_headers_for_simple_request() {
+		let request = CopilotAdapter::to_web_request_data(
+			test_target("gpt-5.4"),
+			ServiceType::Chat,
+			ChatRequest::from_user("hello"),
+			ChatOptionsSet::default(),
+		)
+		.expect("request should build");
+
+		assert!(request.url.ends_with("/chat/completions"));
+		assert_eq!(header_value(&request.headers, "X-Initiator").as_deref(), Some("user"));
+		assert_eq!(
+			header_value(&request.headers, "Editor-Plugin-Version").as_deref(),
+			Some(EDITOR_PLUGIN_VERSION)
+		);
+		assert_eq!(
+			header_value(&request.headers, "User-Agent").as_deref(),
+			Some(USER_AGENT)
+		);
+		assert_eq!(
+			header_value(&request.headers, "Openai-Intent").as_deref(),
+			Some(OPENAI_INTENT)
+		);
+		assert_eq!(
+			header_value(&request.headers, "x-github-api-version").as_deref(),
+			Some(X_GITHUB_API_VERSION)
+		);
+		assert!(header_value(&request.headers, "x-request-id").is_some());
+	}
+
+	#[test]
+	fn test_copilot_marks_tool_history_as_agent_initiated() {
+		let chat_req = ChatRequest::from_user("What's the weather in Paris?")
+			.append_message(ChatMessage::assistant(MessageContent::from_parts(vec![
+				ContentPart::Text("I'll check.".to_string()),
+				ContentPart::ToolCall(test_tool_call()),
+			])))
+			.append_message(ToolResponse::new("call_1", r#"{"temp":"21C"}"#))
+			.append_message(ChatMessage::user("Summarize it."));
+
+		let request = CopilotAdapter::to_web_request_data(
+			test_target("gpt-5.4"),
+			ServiceType::Chat,
+			chat_req,
+			ChatOptionsSet::default(),
+		)
+		.expect("request should build");
+
+		assert_eq!(header_value(&request.headers, "X-Initiator").as_deref(), Some("agent"));
+	}
+
+	#[test]
+	fn test_copilot_adds_vision_header_from_serialized_payload() {
+		let chat_req = ChatRequest::from_messages(vec![ChatMessage::user(MessageContent::from_parts(vec![
+			ContentPart::from_text("Describe this image."),
+			ContentPart::from_binary_url("image/png", "https://example.com/cat.png", None),
+		]))]);
+
+		let request = CopilotAdapter::to_web_request_data(
+			test_target("gpt-5.4"),
+			ServiceType::Chat,
+			chat_req,
+			ChatOptionsSet::default(),
+		)
+		.expect("request should build");
+
+		let messages = request
+			.payload
+			.get("messages")
+			.and_then(serde_json::Value::as_array)
+			.expect("messages should be an array");
+
+		assert!(messages.iter().any(|message| {
+			message
+				.get("content")
+				.and_then(serde_json::Value::as_array)
+				.is_some_and(|parts| {
+					parts.iter().any(|part| {
+						part.get("type")
+							.and_then(serde_json::Value::as_str)
+							.is_some_and(|typ| typ == "image_url")
+					})
+				})
+		}));
+		assert_eq!(
+			header_value(&request.headers, "Copilot-Vision-Request").as_deref(),
+			Some("true")
+		);
+	}
+
+	#[test]
+	fn test_copilot_models_url_uses_public_models_endpoint() {
+		let model_iden = ModelIden::new(AdapterKind::Copilot, "gpt-5.4");
+		let url =
+			CopilotAdapter::get_service_url(&model_iden, ServiceType::Models, CopilotAdapter::default_endpoint())
+				.expect("service url should resolve");
+
+		assert_eq!(url, "https://api.githubcopilot.com/models");
+	}
+
+	#[test]
+	fn test_copilot_filters_models_hidden_from_picker() {
+		assert!(!CopilotAdapter::should_include_model(&serde_json::json!({
+			"id": "hidden-model",
+			"model_picker_enabled": false
+		})));
+		assert!(CopilotAdapter::should_include_model(&serde_json::json!({
+			"id": "visible-model",
+			"model_picker_enabled": true
+		})));
+		assert!(CopilotAdapter::should_include_model(&serde_json::json!({
+			"id": "legacy-model"
+		})));
 	}
 }
