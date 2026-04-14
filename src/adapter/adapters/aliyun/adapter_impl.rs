@@ -88,7 +88,11 @@ impl Adapter for AliyunAdapter {
 		Ok(url)
 	}
 
-	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
+	async fn all_models(
+		kind: AdapterKind,
+		target: ServiceTarget,
+		web_client: &crate::webc::WebClient,
+	) -> Result<Vec<Model>> {
 		OpenAIAdapter::all_models(kind, target, web_client).await
 	}
 

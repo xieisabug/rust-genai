@@ -395,7 +395,7 @@ fn process_buff_string_delimited(
 
 #[cfg(test)]
 mod tests {
-	use super::{decode_utf8_chunk, process_decoded_text, StreamMode};
+	use super::{StreamMode, decode_utf8_chunk, process_decoded_text};
 
 	#[test]
 	fn multibyte_utf8_split_across_chunks_should_not_error() {

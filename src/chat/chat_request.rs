@@ -113,6 +113,18 @@ impl ChatRequest {
 		self
 	}
 
+	/// Set the previous response ID for stateful sessions.
+	pub fn with_previous_response_id(mut self, previous_response_id: impl Into<String>) -> Self {
+		self.previous_response_id = Some(previous_response_id.into());
+		self
+	}
+
+	/// Set whether to store the response for stateful sessions.
+	pub fn with_store(mut self, store: bool) -> Self {
+		self.store = Some(store);
+		self
+	}
+
 	/// Append one tool.
 	pub fn append_tool(mut self, tool: impl Into<Tool>) -> Self {
 		self.tools.get_or_insert_with(Vec::new).push(tool.into());
@@ -186,6 +198,18 @@ impl ChatRequest {
 	}
 }
 
+impl From<Vec<ChatMessage>> for ChatRequest {
+	fn from(messages: Vec<ChatMessage>) -> Self {
+		Self {
+			system: None,
+			messages,
+			tools: None,
+			previous_response_id: None,
+			store: None,
+		}
+	}
+}
+
 // endregion: --- ChatRequest
 
 #[cfg(test)]
@@ -218,8 +242,10 @@ mod tests {
 			reasoning_content: Some("I should inspect the tool call first.".to_string()),
 			model_iden: test_model_iden(),
 			provider_model_iden: test_model_iden(),
+			stop_reason: None,
 			usage: Usage::default(),
 			captured_raw_body: None,
+			response_id: None,
 		};
 		let tool_response = ToolResponse::new("call_1", r#"{"weather":"Sunny"}"#);
 
@@ -239,11 +265,13 @@ mod tests {
 	fn test_append_tool_use_from_stream_end_preserves_reasoning() {
 		let stream_end = StreamEnd {
 			captured_usage: None,
+			captured_stop_reason: None,
 			captured_content: Some(MessageContent::from_parts(vec![
 				ContentPart::Text("Let me check.".to_string()),
 				ContentPart::ToolCall(test_tool_call()),
 			])),
 			captured_reasoning_content: Some("I should inspect the tool call first.".to_string()),
+			captured_response_id: None,
 		};
 		let tool_response = ToolResponse::new("call_1", r#"{"weather":"Sunny"}"#);
 

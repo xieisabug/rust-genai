@@ -32,7 +32,11 @@ impl Adapter for MimoAdapter {
 		OpenAIAdapter::list_model_names_for_end_target(kind, endpoint, auth).await
 	}
 
-	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
+	async fn all_models(
+		kind: AdapterKind,
+		target: ServiceTarget,
+		web_client: &crate::webc::WebClient,
+	) -> Result<Vec<Model>> {
 		OpenAIAdapter::all_models(kind, target, web_client).await
 	}
 

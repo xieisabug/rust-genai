@@ -42,6 +42,20 @@ macro_rules! provider_fallback {
 }
 
 impl ModelCapabilities {
+	fn delegated_capability_target(kind: AdapterKind, model_id: &str) -> Option<(AdapterKind, &str)> {
+		match kind {
+			AdapterKind::OllamaCloud => Some((AdapterKind::Ollama, model_id)),
+			AdapterKind::Vertex => AdapterKind::from_model(model_id).ok().map(|kind| (kind, model_id)),
+			AdapterKind::GithubCopilot => {
+				let (_, provider_model_id) = model_id.split_once('/').unwrap_or(("", model_id));
+				AdapterKind::from_model(provider_model_id)
+					.ok()
+					.map(|kind| (kind, provider_model_id))
+			}
+			_ => None,
+		}
+	}
+
 	// ---------- PUBLIC API ----------
 
 	/// Infer the model token limits (max input, max output)
@@ -130,6 +144,10 @@ impl ModelCapabilities {
 		match kind {
 			AdapterKind::OpenAI => Some(Self::openai_supports_streaming(model_id)),
 			AdapterKind::OpenAIResp => Some(Self::openai_supports_streaming(model_id)),
+			AdapterKind::OllamaCloud | AdapterKind::Vertex | AdapterKind::GithubCopilot => {
+				let (delegated_kind, delegated_model_id) = Self::delegated_capability_target(kind, model_id)?;
+				Self::provider_supports_streaming(delegated_kind, delegated_model_id)
+			}
 			AdapterKind::Anthropic
 			| AdapterKind::Cohere
 			| AdapterKind::DeepSeek
@@ -153,6 +171,10 @@ impl ModelCapabilities {
 		match kind {
 			AdapterKind::OpenAI => Some(Self::openai_supports_json_mode(model_id)),
 			AdapterKind::OpenAIResp => Some(Self::openai_supports_json_mode(model_id)),
+			AdapterKind::OllamaCloud | AdapterKind::Vertex | AdapterKind::GithubCopilot => {
+				let (delegated_kind, delegated_model_id) = Self::delegated_capability_target(kind, model_id)?;
+				Self::provider_supports_json_mode(delegated_kind, delegated_model_id)
+			}
 			AdapterKind::Cohere => Some(Self::cohere_supports_json_mode(model_id)),
 			AdapterKind::DeepSeek => Some(Self::deepseek_supports_json_mode(model_id)),
 			AdapterKind::Anthropic | AdapterKind::Gemini => Some(false),
@@ -175,6 +197,10 @@ impl ModelCapabilities {
 		match kind {
 			AdapterKind::OpenAI => Some(Self::openai_supports_reasoning(model_id)),
 			AdapterKind::OpenAIResp => Some(Self::openai_supports_reasoning(model_id)),
+			AdapterKind::OllamaCloud | AdapterKind::Vertex | AdapterKind::GithubCopilot => {
+				let (delegated_kind, delegated_model_id) = Self::delegated_capability_target(kind, model_id)?;
+				Self::provider_supports_reasoning(delegated_kind, delegated_model_id)
+			}
 			AdapterKind::Anthropic => Some(
 				model_id.contains("claude-4")
 					|| model_id.contains("claude-opus-4")
@@ -199,6 +225,10 @@ impl ModelCapabilities {
 
 	fn provider_input_modalities(kind: AdapterKind, model_id: &str) -> Option<HashSet<Modality>> {
 		match kind {
+			AdapterKind::OllamaCloud | AdapterKind::Vertex | AdapterKind::GithubCopilot => {
+				let (delegated_kind, delegated_model_id) = Self::delegated_capability_target(kind, model_id)?;
+				Self::provider_input_modalities(delegated_kind, delegated_model_id)
+			}
 			AdapterKind::Anthropic => {
 				let mut set = HashSet::from([Modality::Text]);
 				// Claude 3+、Claude 4+ 支持图像输入
@@ -267,6 +297,10 @@ impl ModelCapabilities {
 
 	fn provider_output_modalities(kind: AdapterKind, model_id: &str) -> Option<HashSet<Modality>> {
 		match kind {
+			AdapterKind::OllamaCloud | AdapterKind::Vertex | AdapterKind::GithubCopilot => {
+				let (delegated_kind, delegated_model_id) = Self::delegated_capability_target(kind, model_id)?;
+				Self::provider_output_modalities(delegated_kind, delegated_model_id)
+			}
 			AdapterKind::OpenAI => Some(Self::openai_infer_output_modalities(model_id)),
 			_ => None,
 		}
@@ -275,6 +309,10 @@ impl ModelCapabilities {
 	fn provider_reasoning_efforts(kind: AdapterKind, model_id: &str) -> Option<Vec<ReasoningEffortType>> {
 		match kind {
 			AdapterKind::OpenAI => Some(Self::openai_infer_reasoning_efforts(model_id)),
+			AdapterKind::OllamaCloud | AdapterKind::Vertex | AdapterKind::GithubCopilot => {
+				let (delegated_kind, delegated_model_id) = Self::delegated_capability_target(kind, model_id)?;
+				Self::provider_reasoning_efforts(delegated_kind, delegated_model_id)
+			}
 			AdapterKind::Anthropic => {
 				if model_id.contains("claude-4")
 					|| model_id.contains("claude-opus-4")
@@ -340,6 +378,10 @@ impl ModelCapabilities {
 		match kind {
 			AdapterKind::OpenAI => Self::openai_specific_token_limits(model_id),
 			AdapterKind::OpenAIResp => Self::openai_specific_token_limits(model_id),
+			AdapterKind::OllamaCloud | AdapterKind::Vertex | AdapterKind::GithubCopilot => {
+				let (delegated_kind, delegated_model_id) = Self::delegated_capability_target(kind, model_id)?;
+				Self::provider_token_limits(delegated_kind, delegated_model_id)
+			}
 			AdapterKind::Anthropic => Self::anthropic_token_limits(model_id),
 			AdapterKind::Cohere => Self::cohere_token_limits(model_id),
 			AdapterKind::Copilot | AdapterKind::CopilotResp => Self::openai_specific_token_limits(model_id),

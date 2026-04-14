@@ -1,4 +1,4 @@
-use crate::{Model, ModelIden};
+use crate::adapter::ModelCapabilities;
 use crate::adapter::adapters::support::get_api_key;
 use crate::adapter::openai::OpenAIAdapter;
 use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
@@ -6,8 +6,8 @@ use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse}
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
 use crate::{Error, Headers, Result, ServiceTarget};
+use crate::{Model, ModelIden};
 use reqwest::RequestBuilder;
-use crate::adapter::ModelCapabilities;
 use serde_json::Value;
 use value_ext::JsonValueExt;
 
@@ -16,33 +16,31 @@ pub struct GroqAdapter;
 // Updated model list based on Groq documentation (2025) - newer on top when possible
 pub(in crate::adapter) const MODELS: &[&str] = &[
 	// --- Production Models (stable for production use) ---
-	"moonshotai/kimi-k2-instruct",      // Moonshot AI K2 - 1T params, 32B activated, MoE
-	"qwen/qwen3-32b",                   // Qwen 3 32B - latest generation reasoning model
-	"llama-3.3-70b-versatile",         // Meta Llama 3.3 70B - 131K context
-	"llama-3.1-8b-instant",            // Meta Llama 3.1 8B - fast inference
-	"gemma2-9b-it",                    // Google Gemma2 9B instruction tuned
-	"meta-llama/llama-guard-4-12b",    // Meta Llama Guard 4 - safety model
-	
+	"moonshotai/kimi-k2-instruct",  // Moonshot AI K2 - 1T params, 32B activated, MoE
+	"qwen/qwen3-32b",               // Qwen 3 32B - latest generation reasoning model
+	"llama-3.3-70b-versatile",      // Meta Llama 3.3 70B - 131K context
+	"llama-3.1-8b-instant",         // Meta Llama 3.1 8B - fast inference
+	"gemma2-9b-it",                 // Google Gemma2 9B instruction tuned
+	"meta-llama/llama-guard-4-12b", // Meta Llama Guard 4 - safety model
 	// --- Preview Models (evaluation only, may be discontinued) ---
-	"deepseek-r1-distill-llama-70b",              // DeepSeek R1 distilled reasoning model
-	"meta-llama/llama-4-maverick-17b-128e-instruct",  // Meta Llama 4 Maverick 17B
-	"meta-llama/llama-4-scout-17b-16e-instruct",      // Meta Llama 4 Scout 17B
-	"meta-llama/llama-prompt-guard-2-22m",        // Meta prompt guard 22M
-	"meta-llama/llama-prompt-guard-2-86m",        // Meta prompt guard 86M
-	
+	"deepseek-r1-distill-llama-70b",                 // DeepSeek R1 distilled reasoning model
+	"meta-llama/llama-4-maverick-17b-128e-instruct", // Meta Llama 4 Maverick 17B
+	"meta-llama/llama-4-scout-17b-16e-instruct",     // Meta Llama 4 Scout 17B
+	"meta-llama/llama-prompt-guard-2-22m",           // Meta prompt guard 22M
+	"meta-llama/llama-prompt-guard-2-86m",           // Meta prompt guard 86M
 	// --- Legacy Models (still supported but older) ---
-	"llama-3.1-405b-reasoning",        // Meta Llama 3.1 405B reasoning model
-	"llama-3.1-70b-versatile",         // Meta Llama 3.1 70B versatile
-	"llama-3.2-90b-vision-preview",    // Meta Llama 3.2 90B vision
-	"llama-3.2-11b-vision-preview",    // Meta Llama 3.2 11B vision
-	"llama-3.2-3b-preview",            // Meta Llama 3.2 3B
-	"llama-3.2-1b-preview",            // Meta Llama 3.2 1B
-	"mixtral-8x7b-32768",              // Mistral 8x7B MoE
-	"llama3-70b-8192",                 // Legacy Llama 3 70B
-	"llama-guard-3-8b",                // Legacy Llama Guard 3
-	"gemma-7b-it",                     // Legacy Gemma 7B (deprecated)
+	"llama-3.1-405b-reasoning",     // Meta Llama 3.1 405B reasoning model
+	"llama-3.1-70b-versatile",      // Meta Llama 3.1 70B versatile
+	"llama-3.2-90b-vision-preview", // Meta Llama 3.2 90B vision
+	"llama-3.2-11b-vision-preview", // Meta Llama 3.2 11B vision
+	"llama-3.2-3b-preview",         // Meta Llama 3.2 3B
+	"llama-3.2-1b-preview",         // Meta Llama 3.2 1B
+	"mixtral-8x7b-32768",           // Mistral 8x7B MoE
+	"llama3-70b-8192",              // Legacy Llama 3 70B
+	"llama-guard-3-8b",             // Legacy Llama Guard 3
+	"gemma-7b-it",                  // Legacy Gemma 7B (deprecated)
 
-	// Note: Excluded audio models (whisper, playai-tts) as they're not chat completion models
+	                                // Note: Excluded audio models (whisper, playai-tts) as they're not chat completion models
 ];
 impl GroqAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "GROQ_API_KEY";
@@ -68,7 +66,11 @@ impl Adapter for GroqAdapter {
 		OpenAIAdapter::list_model_names_for_end_target(kind, endpoint, auth).await
 	}
 
-	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
+	async fn all_models(
+		kind: AdapterKind,
+		target: ServiceTarget,
+		web_client: &crate::webc::WebClient,
+	) -> Result<Vec<Model>> {
 		// 使用 API 获取模型列表，如果失败则回退到硬编码列表
 		let auth = target.auth;
 		let endpoint = target.endpoint;
@@ -115,7 +117,7 @@ impl Adapter for GroqAdapter {
 			let model = Self::parse_groq_model_to_model(model_id)?;
 			models.push(model);
 		}
-		
+
 		Ok(models)
 	}
 
@@ -179,7 +181,7 @@ impl GroqAdapter {
 	/// Groq uses OpenAI-compatible format: {"data": [{"id": "model-name", "object": "model", ...}, ...]}
 	fn parse_groq_models_response(mut web_response: crate::webc::WebResponse) -> Result<Vec<String>> {
 		let models_array: Vec<Value> = web_response.body.x_take("data")?;
-		
+
 		let mut model_ids = Vec::new();
 		for mut model_data in models_array {
 			if let Ok(model_id) = model_data.x_take::<String>("id") {
@@ -189,14 +191,14 @@ impl GroqAdapter {
 				}
 			}
 		}
-		
+
 		// If no valid models found in API response, return error to trigger fallback
 		if model_ids.is_empty() {
 			return Err(Error::InvalidJsonResponseElement {
 				info: "No valid Groq models found in API response",
 			});
 		}
-		
+
 		Ok(model_ids)
 	}
 
@@ -204,11 +206,11 @@ impl GroqAdapter {
 	fn parse_groq_model_to_model(model_id: String) -> Result<Model> {
 		let model_name: crate::ModelName = model_id.clone().into();
 		let mut model = Model::new(model_name, model_id.clone());
-		
+
 		// Set Groq model capabilities using the ModelCapabilities system
 		let (max_input_tokens, max_output_tokens) = ModelCapabilities::infer_token_limits(AdapterKind::Groq, &model_id);
 		let supports_reasoning = ModelCapabilities::supports_reasoning(AdapterKind::Groq, &model_id);
-		
+
 		model = model
 			.with_max_input_tokens(max_input_tokens)
 			.with_max_output_tokens(max_output_tokens)
@@ -216,21 +218,21 @@ impl GroqAdapter {
 			.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Groq, &model_id))
 			.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Groq, &model_id))
 			.with_reasoning(supports_reasoning);
-		
+
 		// Set input/output modalities
 		let input_modalities = ModelCapabilities::infer_input_modalities(AdapterKind::Groq, &model_id);
 		let output_modalities = ModelCapabilities::infer_output_modalities(AdapterKind::Groq, &model_id);
-		
+
 		model = model
 			.with_input_modalities(input_modalities)
 			.with_output_modalities(output_modalities);
-		
+
 		// If supports reasoning, set reasoning effort levels
 		if supports_reasoning {
 			let reasoning_efforts = ModelCapabilities::infer_reasoning_efforts(AdapterKind::Groq, &model_id);
 			model = model.with_reasoning_efforts(reasoning_efforts);
 		}
-		
+
 		Ok(model)
 	}
 }

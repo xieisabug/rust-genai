@@ -1,3 +1,4 @@
+use crate::adapter::ModelCapabilities;
 use crate::adapter::adapters::support::get_api_key;
 use crate::adapter::openai::OpenAIAdapter;
 use crate::adapter::openai_resp::OpenAIRespStreamer;
@@ -11,7 +12,6 @@ use crate::resolver::{AuthData, Endpoint};
 use crate::webc::{EventSourceStream, WebResponse};
 use crate::{Error, Headers, Result};
 use crate::{Model, ModelIden, ServiceTarget};
-use crate::adapter::ModelCapabilities;
 use reqwest::RequestBuilder;
 use serde_json::{Map, Value, json};
 use value_ext::JsonValueExt;
@@ -43,7 +43,11 @@ impl Adapter for OpenAIRespAdapter {
 		OpenAIAdapter::list_model_names_for_end_target(kind, endpoint, auth).await
 	}
 
-	async fn all_models(kind: AdapterKind, target: ServiceTarget, _web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
+	async fn all_models(
+		kind: AdapterKind,
+		target: ServiceTarget,
+		_web_client: &crate::webc::WebClient,
+	) -> Result<Vec<Model>> {
 		let names = Self::all_model_names(kind, target.endpoint, target.auth).await?;
 		let mut models: Vec<Model> = Vec::new();
 		for id in names {
@@ -82,7 +86,7 @@ impl Adapter for OpenAIRespAdapter {
 	/// - `.store = false` - To maintain consistent behavior with other chat completions, store is set to false
 	/// - `.instructions` For now we do not use the top ".instructions" (genai::ChatRequest.system),
 	///   but just add this top system as a regular system message.
-	/// - `.summary` right now, supporting "generate reasoning summary" is not supported
+	/// - `.summary` reasoning summary is opt-in via `ChatOptions.capture_reasoning_content(true)` → `"detailed"`
 	///
 	fn to_web_request_data(
 		target: ServiceTarget,
@@ -172,10 +176,23 @@ impl Adapter for OpenAIRespAdapter {
 		if let Some(reasoning_effort) = reasoning_effort
 			&& let Some(keyword) = reasoning_effort.as_keyword()
 		{
-			// NOTE: For now, we do not set the "summary" property to generate the reasoning summary
+			let mut reasoning_obj = json!({"effort": keyword});
 
-			payload.x_insert("reasoning", json!({"effort": keyword}))?;
-			// TODO: needs to find a way to add summary: auto, concise, detailed
+			// Opt-in: only request detailed reasoning summaries when the caller
+			// explicitly asks for reasoning content capture.
+			if chat_options.capture_reasoning_content() == Some(true) {
+				reasoning_obj
+					.x_insert("summary", "detailed")
+					.map_err(|e| Error::Internal(format!("reasoning summary insert: {e}")))?;
+			}
+
+			payload.x_insert("reasoning", reasoning_obj)?;
+		}
+
+		// -- Opt-in: request encrypted reasoning content (thought signatures)
+		// when the caller explicitly asks for reasoning content capture.
+		if chat_options.capture_reasoning_content() == Some(true) {
+			payload.x_insert("include", json!(["reasoning.encrypted_content"]))?;
 		}
 
 		// -- Tools
@@ -188,25 +205,13 @@ impl Adapter for OpenAIRespAdapter {
 			match response_format {
 				ChatResponseFormat::JsonMode => Some(json!({"type": "json_object"})),
 				ChatResponseFormat::JsonSpec(st_json) => {
-					// "type": "json_schema", "json_schema": {...}
-					let mut schema = st_json.schema.clone();
-					schema.x_walk(|parent_map, name| {
-						if name == "type" {
-							let typ = parent_map.get("type").and_then(|v| v.as_str()).unwrap_or("");
-							if typ == "object" {
-								parent_map.insert("additionalProperties".to_string(), false.into());
-							}
-						}
-						true
-					});
-
 					// Flatten for OpenAI Responses
 					Some(json!({
 						"type": "json_schema",
 						"name": st_json.name.clone(),
 						"strict": true,
 						// TODO: add description
-						"schema": schema,
+						"schema": st_json.schema_with_additional_properties_false(),
 					}))
 				}
 			}
@@ -555,6 +560,7 @@ impl OpenAIRespAdapter {
 			name,
 			description,
 			schema,
+			strict,
 			config,
 		} = tool;
 
@@ -581,14 +587,29 @@ impl OpenAIRespAdapter {
 				tool_value
 			}
 			name => {
+				let strict = strict.unwrap_or(false);
+				let mut parameters = schema;
+
+				// When strict mode is enabled, OpenAI requires `additionalProperties: false`
+				// on every object node in the schema.
+				if strict && let Some(ref mut schema_val) = parameters {
+					schema_val.x_walk(|parent_map, prop_name| {
+						if prop_name == "type" {
+							let typ = parent_map.get("type").and_then(|v| v.as_str()).unwrap_or("");
+							if typ == "object" {
+								parent_map.insert("additionalProperties".to_string(), false.into());
+							}
+						}
+						true
+					});
+				}
+
 				json!({
 					"type": "function",
 					"name": name,
 					"description": description,
-					"parameters": schema,
-					// TODO: If we need to support `strict: true` we need to add additionalProperties: false into the schema
-					//       above (like structured output)
-					"strict": false,
+					"parameters": parameters,
+					"strict": strict,
 				})
 			}
 		};

@@ -1,6 +1,10 @@
 //! Example showing how to get model information using the client
 
-use genai::{adapter::AdapterKind, resolver::{AuthData, Endpoint, ServiceTargetResolver}, Client, ModelIden, ServiceTarget};
+use genai::{
+	Client, ModelIden, ServiceTarget,
+	adapter::AdapterKind,
+	resolver::{AuthData, Endpoint, ServiceTargetResolver},
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -22,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 	for &adapter_kind in ADAPTER_KINDS {
 		println!("\n🔍 获取 {} 的模型信息...", adapter_kind);
-		
+
 		match client.all_models(adapter_kind).await {
 			Ok(models) => {
 				if models.is_empty() {
@@ -31,12 +35,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 				}
 
 				println!("   ✅ 找到 {} 个模型:\n", models.len());
-				
+
 				for (index, model) in models.iter().enumerate() {
 					println!("   📋 模型 #{}: {}", index + 1, model.name);
 					println!("      模型 ID: {}", model.id);
 					println!("      适配器类型: {}", adapter_kind);
-					
+
 					// 显示支持的功能
 					let mut features = Vec::new();
 					if model.supports_tool_calls {
@@ -54,11 +58,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 					if model.is_multimodal() {
 						features.push("🖼️ 多模态");
 					}
-					
+
 					if !features.is_empty() {
 						println!("      支持的功能: {}", features.join(", "));
 					}
-					
+
 					// 显示令牌限制
 					if let Some(input_limit) = model.effective_input_token_limit() {
 						println!("      输入令牌限制: {}", input_limit);
@@ -66,13 +70,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 					if let Some(output_limit) = model.effective_output_token_limit() {
 						println!("      输出令牌限制: {}", output_limit);
 					}
-					
+
 					// 显示支持的模态
 					if model.is_multimodal() {
 						println!("      输入模态: {:?}", model.supported_input_modalities);
 						println!("      输出模态: {:?}", model.supported_output_modalities);
 					}
-					
+
 					// 显示推理能力详情
 					if model.supports_reasoning {
 						if let Some(ref efforts) = model.supported_reasoning_efforts {
@@ -81,7 +85,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 							}
 						}
 					}
-					
+
 					println!();
 				}
 			}
@@ -102,4 +106,4 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	println!("   • 某些模型可能需要特殊权限才能访问");
 
 	Ok(())
-} 
+}

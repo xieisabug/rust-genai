@@ -136,7 +136,11 @@ impl Adapter for OpenAIAdapter {
 		OpenAIAdapter::list_model_names_for_end_target(kind, endpoint, auth).await
 	}
 
-	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
+	async fn all_models(
+		kind: AdapterKind,
+		target: ServiceTarget,
+		web_client: &crate::webc::WebClient,
+	) -> Result<Vec<Model>> {
 		// 使用默认的认证和端点配置
 		let auth = target.auth;
 		let endpoint = target.endpoint;
@@ -307,8 +311,6 @@ impl Adapter for OpenAIAdapter {
 		super::embed::to_embed_response(model_iden, web_response, options_set)
 	}
 }
-
-
 
 // region:    --- Support
 

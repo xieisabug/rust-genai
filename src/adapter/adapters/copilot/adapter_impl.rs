@@ -628,9 +628,8 @@ mod tests {
 	#[test]
 	fn test_copilot_models_url_uses_public_models_endpoint() {
 		let model_iden = ModelIden::new(AdapterKind::Copilot, "gpt-5.4");
-		let url =
-			CopilotAdapter::get_service_url(&model_iden, ServiceType::Models, CopilotAdapter::default_endpoint())
-				.expect("service url should resolve");
+		let url = CopilotAdapter::get_service_url(&model_iden, ServiceType::Models, CopilotAdapter::default_endpoint())
+			.expect("service url should resolve");
 
 		assert_eq!(url, "https://api.githubcopilot.com/models");
 	}

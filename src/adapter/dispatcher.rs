@@ -1,7 +1,9 @@
 use super::groq::GroqAdapter;
 use crate::adapter::adapters::copilot::CopilotAdapter;
 use crate::adapter::adapters::copilot_resp::CopilotRespAdapter;
+use crate::adapter::adapters::github_copilot::GithubCopilotAdapter;
 use crate::adapter::adapters::mimo::MimoAdapter;
+use crate::adapter::adapters::ollama_cloud::OllamaCloudAdapter;
 use crate::adapter::adapters::together::TogetherAdapter;
 use crate::adapter::adapters::zai::ZaiAdapter;
 use crate::adapter::aliyun::AliyunAdapter;
@@ -15,6 +17,7 @@ use crate::adapter::nebius::NebiusAdapter;
 use crate::adapter::ollama::OllamaAdapter;
 use crate::adapter::openai::OpenAIAdapter;
 use crate::adapter::openai_resp::OpenAIRespAdapter;
+use crate::adapter::vertex::VertexAdapter;
 use crate::adapter::xai::XaiAdapter;
 use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse};
@@ -53,6 +56,9 @@ impl AdapterDispatcher {
 			AdapterKind::Copilot => CopilotAdapter::default_endpoint(),
 			AdapterKind::CopilotResp => CopilotRespAdapter::default_endpoint(),
 			AdapterKind::Ollama => OllamaAdapter::default_endpoint(),
+			AdapterKind::OllamaCloud => OllamaCloudAdapter::default_endpoint(),
+			AdapterKind::Vertex => VertexAdapter::default_endpoint(),
+			AdapterKind::GithubCopilot => GithubCopilotAdapter::default_endpoint(),
 		}
 	}
 
@@ -76,6 +82,9 @@ impl AdapterDispatcher {
 			AdapterKind::Copilot => CopilotAdapter::default_auth(),
 			AdapterKind::CopilotResp => CopilotRespAdapter::default_auth(),
 			AdapterKind::Ollama => OllamaAdapter::default_auth(),
+			AdapterKind::OllamaCloud => OllamaCloudAdapter::default_auth(),
+			AdapterKind::Vertex => VertexAdapter::default_auth(),
+			AdapterKind::GithubCopilot => GithubCopilotAdapter::default_auth(),
 		}
 	}
 
@@ -99,6 +108,9 @@ impl AdapterDispatcher {
 			AdapterKind::Copilot => CopilotAdapter::all_model_names(kind, endpoint, auth).await,
 			AdapterKind::CopilotResp => CopilotRespAdapter::all_model_names(kind, endpoint, auth).await,
 			AdapterKind::Ollama => OllamaAdapter::all_model_names(kind, endpoint, auth).await,
+			AdapterKind::OllamaCloud => OllamaCloudAdapter::all_model_names(kind, endpoint, auth).await,
+			AdapterKind::Vertex => VertexAdapter::all_model_names(kind, endpoint, auth).await,
+			AdapterKind::GithubCopilot => GithubCopilotAdapter::all_model_names(kind, endpoint, auth).await,
 		}
 	}
 
@@ -122,6 +134,9 @@ impl AdapterDispatcher {
 			AdapterKind::CopilotResp => CopilotRespAdapter::all_models(kind, target, web_client).await,
 			AdapterKind::Fireworks => FireworksAdapter::all_models(kind, target, web_client).await,
 			AdapterKind::Together => TogetherAdapter::all_models(kind, target, web_client).await,
+			AdapterKind::OllamaCloud => OllamaCloudAdapter::all_models(kind, target, web_client).await,
+			AdapterKind::Vertex => VertexAdapter::all_models(kind, target, web_client).await,
+			AdapterKind::GithubCopilot => GithubCopilotAdapter::all_models(kind, target, web_client).await,
 		}
 	}
 
@@ -145,6 +160,9 @@ impl AdapterDispatcher {
 			AdapterKind::Copilot => CopilotAdapter::get_service_url(model, service_type, endpoint),
 			AdapterKind::CopilotResp => CopilotRespAdapter::get_service_url(model, service_type, endpoint),
 			AdapterKind::Ollama => OllamaAdapter::get_service_url(model, service_type, endpoint),
+			AdapterKind::OllamaCloud => OllamaCloudAdapter::get_service_url(model, service_type, endpoint),
+			AdapterKind::Vertex => VertexAdapter::get_service_url(model, service_type, endpoint),
+			AdapterKind::GithubCopilot => GithubCopilotAdapter::get_service_url(model, service_type, endpoint),
 		}
 	}
 
@@ -182,6 +200,13 @@ impl AdapterDispatcher {
 				CopilotRespAdapter::to_web_request_data(target, service_type, chat_req, options_set)
 			}
 			AdapterKind::Ollama => OllamaAdapter::to_web_request_data(target, service_type, chat_req, options_set),
+			AdapterKind::OllamaCloud => {
+				OllamaCloudAdapter::to_web_request_data(target, service_type, chat_req, options_set)
+			}
+			AdapterKind::Vertex => VertexAdapter::to_web_request_data(target, service_type, chat_req, options_set),
+			AdapterKind::GithubCopilot => {
+				GithubCopilotAdapter::to_web_request_data(target, service_type, chat_req, options_set)
+			}
 		}
 	}
 
@@ -209,6 +234,9 @@ impl AdapterDispatcher {
 			AdapterKind::Copilot => CopilotAdapter::to_chat_response(model_iden, web_response, options_set),
 			AdapterKind::CopilotResp => CopilotRespAdapter::to_chat_response(model_iden, web_response, options_set),
 			AdapterKind::Ollama => OllamaAdapter::to_chat_response(model_iden, web_response, options_set),
+			AdapterKind::OllamaCloud => OllamaCloudAdapter::to_chat_response(model_iden, web_response, options_set),
+			AdapterKind::Vertex => VertexAdapter::to_chat_response(model_iden, web_response, options_set),
+			AdapterKind::GithubCopilot => GithubCopilotAdapter::to_chat_response(model_iden, web_response, options_set),
 		}
 	}
 
@@ -236,6 +264,11 @@ impl AdapterDispatcher {
 			AdapterKind::Copilot => CopilotAdapter::to_chat_stream(model_iden, reqwest_builder, options_set),
 			AdapterKind::CopilotResp => CopilotRespAdapter::to_chat_stream(model_iden, reqwest_builder, options_set),
 			AdapterKind::Ollama => OllamaAdapter::to_chat_stream(model_iden, reqwest_builder, options_set),
+			AdapterKind::OllamaCloud => OllamaCloudAdapter::to_chat_stream(model_iden, reqwest_builder, options_set),
+			AdapterKind::Vertex => VertexAdapter::to_chat_stream(model_iden, reqwest_builder, options_set),
+			AdapterKind::GithubCopilot => {
+				GithubCopilotAdapter::to_chat_stream(model_iden, reqwest_builder, options_set)
+			}
 		}
 	}
 
@@ -267,6 +300,9 @@ impl AdapterDispatcher {
 			AdapterKind::Copilot => CopilotAdapter::to_embed_request_data(target, embed_req, options_set),
 			AdapterKind::CopilotResp => CopilotRespAdapter::to_embed_request_data(target, embed_req, options_set),
 			AdapterKind::Ollama => OllamaAdapter::to_embed_request_data(target, embed_req, options_set),
+			AdapterKind::OllamaCloud => OllamaCloudAdapter::to_embed_request_data(target, embed_req, options_set),
+			AdapterKind::Vertex => VertexAdapter::to_embed_request_data(target, embed_req, options_set),
+			AdapterKind::GithubCopilot => GithubCopilotAdapter::to_embed_request_data(target, embed_req, options_set),
 		}
 	}
 
@@ -297,6 +333,11 @@ impl AdapterDispatcher {
 			AdapterKind::Copilot => CopilotAdapter::to_embed_response(model_iden, web_response, options_set),
 			AdapterKind::CopilotResp => CopilotRespAdapter::to_embed_response(model_iden, web_response, options_set),
 			AdapterKind::Ollama => OllamaAdapter::to_embed_response(model_iden, web_response, options_set),
+			AdapterKind::OllamaCloud => OllamaCloudAdapter::to_embed_response(model_iden, web_response, options_set),
+			AdapterKind::Vertex => VertexAdapter::to_embed_response(model_iden, web_response, options_set),
+			AdapterKind::GithubCopilot => {
+				GithubCopilotAdapter::to_embed_response(model_iden, web_response, options_set)
+			}
 		}
 	}
 }

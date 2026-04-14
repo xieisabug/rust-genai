@@ -1,5 +1,7 @@
 use crate::adapter::adapters::copilot_resp::CopilotRespAdapter;
+use crate::adapter::adapters::github_copilot::GithubCopilotAdapter;
 use crate::adapter::adapters::ollama::OllamaAdapter;
+use crate::adapter::adapters::ollama_cloud::OllamaCloudAdapter;
 use crate::adapter::adapters::openai_resp::OpenAIRespAdapter;
 use crate::adapter::adapters::together::TogetherAdapter;
 use crate::adapter::adapters::zai::ZaiAdapter;
@@ -14,6 +16,7 @@ use crate::adapter::groq::GroqAdapter;
 use crate::adapter::mimo::MimoAdapter;
 use crate::adapter::nebius::NebiusAdapter;
 use crate::adapter::openai::OpenAIAdapter;
+use crate::adapter::vertex::VertexAdapter;
 use crate::adapter::xai::XaiAdapter;
 use crate::adapter::{Adapter as _, zai};
 use crate::{ModelName, Result};
@@ -61,6 +64,14 @@ pub enum AdapterKind {
 	CopilotResp,
 	/// OpenAI shared behavior + some custom. (currently, localhost only, can be customize with ServerTargetResolver).
 	Ollama,
+	/// For Ollama Cloud (ollama.com) - uses native Ollama protocol with Bearer auth
+	OllamaCloud,
+	/// Google Vertex AI (Model Garden). Supports Gemini and Claude models via publishers/google and publishers/anthropic.
+	/// Uses namespace routing: `vertex::gemini-2.5-flash`, `vertex::claude-sonnet-4-6`
+	Vertex,
+	/// GitHub Models inference API (multi-publisher gateway for OpenAI, Anthropic, and Google models).
+	/// Uses namespace routing: `github_copilot::openai/gpt-4.1-mini`, `github_copilot::anthropic/claude-sonnet-4-6`, `github_copilot::google/gemini-2.5-pro`
+	GithubCopilot,
 }
 
 /// Serialization/Parse implementations
@@ -86,6 +97,9 @@ impl AdapterKind {
 			AdapterKind::Copilot => "Copilot",
 			AdapterKind::CopilotResp => "CopilotResp",
 			AdapterKind::Ollama => "Ollama",
+			AdapterKind::OllamaCloud => "OllamaCloud",
+			AdapterKind::Vertex => "Vertex",
+			AdapterKind::GithubCopilot => "GithubCopilot",
 		}
 	}
 
@@ -110,6 +124,9 @@ impl AdapterKind {
 			AdapterKind::Copilot => "copilot",
 			AdapterKind::CopilotResp => "copilot_resp",
 			AdapterKind::Ollama => "ollama",
+			AdapterKind::OllamaCloud => "ollama_cloud",
+			AdapterKind::Vertex => "vertex",
+			AdapterKind::GithubCopilot => "github_copilot",
 		}
 	}
 
@@ -133,6 +150,9 @@ impl AdapterKind {
 			"copilot" => Some(AdapterKind::Copilot),
 			"copilot_resp" => Some(AdapterKind::CopilotResp),
 			"ollama" => Some(AdapterKind::Ollama),
+			"ollama_cloud" => Some(AdapterKind::OllamaCloud),
+			"vertex" => Some(AdapterKind::Vertex),
+			"github_copilot" => Some(AdapterKind::GithubCopilot),
 			_ => None,
 		}
 	}
@@ -161,6 +181,9 @@ impl AdapterKind {
 			AdapterKind::Copilot => None,
 			AdapterKind::CopilotResp => CopilotRespAdapter::DEFAULT_API_KEY_ENV_NAME,
 			AdapterKind::Ollama => OllamaAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::OllamaCloud => OllamaCloudAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::Vertex => VertexAdapter::DEFAULT_API_KEY_ENV_NAME,
+			AdapterKind::GithubCopilot => GithubCopilotAdapter::DEFAULT_API_KEY_ENV_NAME,
 		}
 	}
 }
@@ -186,6 +209,7 @@ impl AdapterKind {
 	/// - e.g., for together.ai `together::meta-llama/Llama-3-8b-chat-hf`
 	/// - e.g., for nebius with `nebius::Qwen/Qwen3-235B-A22B`
 	/// - e.g., for ZAI coding plan with `coding::glm-4.6`
+	/// - e.g., for vertex with `vertex::gemini-2.5-flash` or `vertex::claude-sonnet-4-6`
 	///
 	/// And all adapters can be force namspaced as well.
 	///

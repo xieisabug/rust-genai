@@ -21,8 +21,17 @@ pub struct ChatMessage {
 	pub options: Option<MessageOptions>,
 }
 
-/// Constructors
+// region:    --- Constructors
 impl ChatMessage {
+	/// Constructs a message for the provided role.
+	pub fn new(role: ChatRole, content: impl Into<MessageContent>) -> Self {
+		Self {
+			role,
+			content: content.into(),
+			options: None,
+		}
+	}
+
 	/// Constructs a system message.
 	pub fn system(content: impl Into<MessageContent>) -> Self {
 		Self {
@@ -49,9 +58,19 @@ impl ChatMessage {
 			options: None,
 		}
 	}
-}
 
-/// Computed accessors
+	/// Constructs a tool message.
+	pub fn tool(content: impl Into<MessageContent>) -> Self {
+		Self {
+			role: ChatRole::Tool,
+			content: content.into(),
+			options: None,
+		}
+	}
+}
+// endregion: --- Constructors
+
+// region:    --- Accessors
 impl ChatMessage {
 	/// Returns an approximate in-memory size of this `ChatMessage`, in bytes,
 	/// computed as the size of the content plus.
@@ -60,7 +79,9 @@ impl ChatMessage {
 		self.content.size()
 	}
 }
+// endregion: --- Accessors
 
+// region:    --- Builders
 impl ChatMessage {
 	/// Attaches options to this message.
 	pub fn with_options(mut self, options: impl Into<MessageOptions>) -> Self {
@@ -87,14 +108,23 @@ impl ChatMessage {
 		ChatMessage::assistant(MessageContent::from_parts(parts))
 	}
 }
+// endregion: --- Builders
+
 // region:    --- MessageOptions
 
-#[derive(Debug, Clone, Serialize, Deserialize, From)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, From)]
 /// Per-message options (e.g., cache control).
 pub struct MessageOptions {
 	#[from]
 	/// Per-provider cache behavior hint.
 	pub cache_control: Option<CacheControl>,
+}
+
+impl MessageOptions {
+	pub fn with_cache_control(mut self, cache_control: impl Into<CacheControl>) -> Self {
+		self.cache_control = Some(cache_control.into());
+		self
+	}
 }
 
 /// Cache control for prompt caching.
@@ -145,6 +175,8 @@ impl From<CacheControl> for MessageOptions {
 }
 // endregion: --- MessageOptions
 
+// region:    --- ChatRole
+
 /// Chat roles recognized across providers.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, derive_more::Display)]
 #[allow(missing_docs)]
@@ -154,6 +186,8 @@ pub enum ChatRole {
 	Assistant,
 	Tool,
 }
+
+// endregion: --- ChatRole
 
 // region:    --- Froms
 
@@ -177,22 +211,13 @@ impl From<Vec<ToolCall>> for ChatMessage {
 
 impl From<ToolResponse> for ChatMessage {
 	fn from(value: ToolResponse) -> Self {
-		Self {
-			role: ChatRole::Tool,
-			content: MessageContent::from(value),
-			options: None,
-		}
+		ChatMessage::tool(value)
 	}
 }
 
 impl From<Vec<ToolResponse>> for ChatMessage {
 	fn from(responses: Vec<ToolResponse>) -> Self {
-		let parts: Vec<ContentPart> = responses.into_iter().map(ContentPart::ToolResponse).collect();
-		Self {
-			role: ChatRole::Tool,
-			content: MessageContent::from_parts(parts),
-			options: None,
-		}
+		ChatMessage::tool(MessageContent::from(responses))
 	}
 }
 

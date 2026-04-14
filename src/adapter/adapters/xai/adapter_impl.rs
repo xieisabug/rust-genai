@@ -1,4 +1,4 @@
-use crate::{Model, ModelIden};
+use crate::adapter::ModelCapabilities;
 use crate::adapter::adapters::support::get_api_key;
 use crate::adapter::openai::OpenAIAdapter;
 use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
@@ -6,8 +6,8 @@ use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse}
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
 use crate::{Error, Headers, Result, ServiceTarget};
+use crate::{Model, ModelIden};
 use reqwest::RequestBuilder;
-use crate::adapter::ModelCapabilities;
 use serde_json::Value;
 use value_ext::JsonValueExt;
 
@@ -16,17 +16,16 @@ pub struct XaiAdapter;
 // Updated xAI model list based on official xAI documentation (2025) - newer on top
 pub(in crate::adapter) const MODELS: &[&str] = &[
 	// --- Language Models (verified from official xAI docs) ---
-	"grok-4-0709",                 // Grok 4 - 256K context, most advanced
-	"grok-3",                      // Grok 3 - 131K context, production ready
-	"grok-3-mini",                 // Grok 3 Mini - 131K context, lightweight
-	"grok-3-fast",                 // Grok 3 Fast - 131K context, optimized for speed
-	"grok-3-mini-fast",            // Grok 3 Mini Fast - 131K context, fastest option
-	
+	"grok-4-0709",      // Grok 4 - 256K context, most advanced
+	"grok-3",           // Grok 3 - 131K context, production ready
+	"grok-3-mini",      // Grok 3 Mini - 131K context, lightweight
+	"grok-3-fast",      // Grok 3 Fast - 131K context, optimized for speed
+	"grok-3-mini-fast", // Grok 3 Mini Fast - 131K context, fastest option
 	// --- Vision Models ---
-	"grok-2-vision-1212",          // Grok 2 Vision - 32K context, multimodal
-	
-	// Note: Excluding image generation models (grok-2-image-1212) as they're not chat completion models
-	// Note: Beta models (grok-3-beta, grok-3-mini-beta) not in official list - removed
+	"grok-2-vision-1212", // Grok 2 Vision - 32K context, multimodal
+
+	                      // Note: Excluding image generation models (grok-2-image-1212) as they're not chat completion models
+	                      // Note: Beta models (grok-3-beta, grok-3-mini-beta) not in official list - removed
 ];
 impl XaiAdapter {
 	pub const API_KEY_DEFAULT_ENV_NAME: &str = "XAI_API_KEY";
@@ -52,7 +51,11 @@ impl Adapter for XaiAdapter {
 		OpenAIAdapter::list_model_names_for_end_target(kind, endpoint, auth).await
 	}
 
-	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
+	async fn all_models(
+		kind: AdapterKind,
+		target: ServiceTarget,
+		web_client: &crate::webc::WebClient,
+	) -> Result<Vec<Model>> {
 		// 使用 API 获取模型列表，如果失败则回退到硬编码列表
 		let auth = target.auth;
 		let endpoint = target.endpoint;
@@ -99,7 +102,7 @@ impl Adapter for XaiAdapter {
 			let model = Self::parse_xai_model_to_model(model_id)?;
 			models.push(model);
 		}
-		
+
 		Ok(models)
 	}
 
@@ -157,7 +160,7 @@ impl XaiAdapter {
 	/// xAI uses OpenAI-compatible format: {"data": [{"id": "model-name", "object": "model", ...}, ...]}
 	fn parse_xai_models_response(mut web_response: crate::webc::WebResponse) -> Result<Vec<String>> {
 		let models_array: Vec<Value> = web_response.body.x_take("data")?;
-		
+
 		let mut model_ids = Vec::new();
 		for mut model_data in models_array {
 			if let Ok(model_id) = model_data.x_take::<String>("id") {
@@ -167,14 +170,14 @@ impl XaiAdapter {
 				}
 			}
 		}
-		
+
 		// If no valid models found in API response, return error to trigger fallback
 		if model_ids.is_empty() {
 			return Err(Error::InvalidJsonResponseElement {
 				info: "No valid xAI models found in API response",
 			});
 		}
-		
+
 		Ok(model_ids)
 	}
 
@@ -182,11 +185,11 @@ impl XaiAdapter {
 	fn parse_xai_model_to_model(model_id: String) -> Result<Model> {
 		let model_name: crate::ModelName = model_id.clone().into();
 		let mut model = Model::new(model_name, model_id.clone());
-		
+
 		// Set xAI model capabilities using the ModelCapabilities system
 		let (max_input_tokens, max_output_tokens) = ModelCapabilities::infer_token_limits(AdapterKind::Xai, &model_id);
 		let supports_reasoning = ModelCapabilities::supports_reasoning(AdapterKind::Xai, &model_id);
-		
+
 		model = model
 			.with_max_input_tokens(max_input_tokens)
 			.with_max_output_tokens(max_output_tokens)
@@ -194,21 +197,21 @@ impl XaiAdapter {
 			.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Xai, &model_id))
 			.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Xai, &model_id))
 			.with_reasoning(supports_reasoning);
-		
+
 		// Set input/output modalities
 		let input_modalities = ModelCapabilities::infer_input_modalities(AdapterKind::Xai, &model_id);
 		let output_modalities = ModelCapabilities::infer_output_modalities(AdapterKind::Xai, &model_id);
-		
+
 		model = model
 			.with_input_modalities(input_modalities)
 			.with_output_modalities(output_modalities);
-		
+
 		// If supports reasoning, set reasoning effort levels
 		if supports_reasoning {
 			let reasoning_efforts = ModelCapabilities::infer_reasoning_efforts(AdapterKind::Xai, &model_id);
 			model = model.with_reasoning_efforts(reasoning_efforts);
 		}
-		
+
 		Ok(model)
 	}
 }

@@ -243,8 +243,10 @@ mod tests {
 			reasoning_content: Some("I should inspect the weather tool first.".to_string()),
 			model_iden: test_model_iden(),
 			provider_model_iden: test_model_iden(),
+			stop_reason: None,
 			usage: Usage::default(),
 			captured_raw_body: None,
+			response_id: None,
 		};
 
 		let assistant_msg = chat_res
@@ -267,8 +269,10 @@ mod tests {
 			reasoning_content: Some("Reasoning should not matter without tool calls.".to_string()),
 			model_iden: test_model_iden(),
 			provider_model_iden: test_model_iden(),
+			stop_reason: None,
 			usage: Usage::default(),
 			captured_raw_body: None,
+			response_id: None,
 		};
 
 		assert!(chat_res.assistant_message_for_tool_use().is_none());

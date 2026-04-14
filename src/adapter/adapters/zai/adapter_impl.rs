@@ -97,7 +97,11 @@ impl Adapter for ZaiAdapter {
 		OpenAIAdapter::list_model_names_for_end_target(kind, endpoint, auth).await
 	}
 
-	async fn all_models(_kind: AdapterKind, _target: ServiceTarget, _web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
+	async fn all_models(
+		_kind: AdapterKind,
+		_target: ServiceTarget,
+		_web_client: &crate::webc::WebClient,
+	) -> Result<Vec<Model>> {
 		// ZAI doesn't have a models endpoint; build from hardcoded list
 		let mut models: Vec<Model> = Vec::new();
 		for model_id in MODELS {
@@ -168,7 +172,6 @@ impl Adapter for ZaiAdapter {
 
 // region:    --- Support Functions
 
-
 /// Support functions for ZaiAdapter
 impl ZaiAdapter {
 	/// Convert a Zai (GLM) model ID to a complete Model object with capabilities
@@ -177,8 +180,7 @@ impl ZaiAdapter {
 		let mut model = Model::new(model_name, model_id.clone());
 
 		// Set Zai model capabilities using the ModelCapabilities system
-		let (max_input_tokens, max_output_tokens) =
-			ModelCapabilities::infer_token_limits(AdapterKind::Zai, &model_id);
+		let (max_input_tokens, max_output_tokens) = ModelCapabilities::infer_token_limits(AdapterKind::Zai, &model_id);
 		let supports_reasoning = ModelCapabilities::supports_reasoning(AdapterKind::Zai, &model_id);
 
 		model = model

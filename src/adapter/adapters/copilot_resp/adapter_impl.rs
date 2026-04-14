@@ -1,3 +1,5 @@
+#[cfg(test)]
+use crate::Headers;
 use crate::adapter::ModelCapabilities;
 use crate::adapter::adapters::copilot::CopilotAdapter;
 use crate::adapter::adapters::copilot_headers::build_copilot_headers;
@@ -14,8 +16,6 @@ use crate::embed::{EmbedOptionsSet, EmbedRequest, EmbedResponse};
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::{EventSourceStream, WebClient, WebResponse};
 use crate::{Error, Model, ModelIden, Result, ServiceTarget};
-#[cfg(test)]
-use crate::Headers;
 use reqwest::RequestBuilder;
 use serde_json::{Map, Value, json};
 use value_ext::JsonValueExt;
@@ -190,6 +190,7 @@ impl CopilotRespAdapter {
 			description,
 			schema,
 			config,
+			..
 		} = tool;
 
 		let name = match name {

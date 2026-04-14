@@ -1,22 +1,22 @@
+use crate::Model;
+use crate::adapter::ModelCapabilities;
 use crate::adapter::adapters::support::get_api_key;
 use crate::adapter::anthropic::AnthropicStreamer;
 use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{
-	Binary, BinarySource, CacheControl, CacheCreationDetails, ChatOptionsSet, ChatRequest, ChatResponse, ChatRole,
-	ChatStream, ChatStreamResponse, ContentPart, MessageContent, PromptTokensDetails, ReasoningEffort, StopReason,
-	Tool, ToolCall, ToolConfig, ToolName, Usage,
+	Binary, BinarySource, CacheControl, CacheCreationDetails, ChatOptionsSet, ChatRequest, ChatResponse,
+	ChatResponseFormat, ChatRole, ChatStream, ChatStreamResponse, ContentPart, MessageContent, PromptTokensDetails,
+	ReasoningEffort, StopReason, Tool, ToolCall, ToolConfig, ToolName, Usage,
 };
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::{EventSourceStream, WebResponse};
 use crate::{Error, Headers, ModelIden};
 use crate::{Result, ServiceTarget};
 use reqwest::RequestBuilder;
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use tracing::info;
 use tracing::warn;
 use value_ext::JsonValueExt;
-use crate::{Model};
-use crate::adapter::ModelCapabilities;
 
 pub struct AnthropicAdapter;
 const MODELS: &[&str] = &[
@@ -42,7 +42,12 @@ fn has_model(model_prefixes: &[&str], model_name: &str) -> bool {
 	model_prefixes.iter().any(|prefix| model_name.contains(prefix))
 }
 
-fn insert_anthropic_reasoning(payload: &mut Value, model_name: &str, effort: &ReasoningEffort) -> Result<()> {
+fn insert_anthropic_reasoning(
+	payload: &mut Value,
+	output_config: &mut Map<String, Value>,
+	model_name: &str,
+	effort: &ReasoningEffort,
+) -> Result<()> {
 	let mut budget: Option<u32> = None;
 	let support_effort = has_model(SUPPORT_EFFORT_MODELS, model_name);
 	let support_reasoning_max = has_model(SUPPORT_REASONING_MAX_MODELS, model_name);
@@ -58,7 +63,7 @@ fn insert_anthropic_reasoning(payload: &mut Value, model_name: &str, effort: &Re
 			ReasoningEffort::Max | ReasoningEffort::XHigh if support_reasoning_max => "max",
 			ReasoningEffort::XHigh => "high",
 			ReasoningEffort::Max => "high",
-			// we apture for later
+			// we capture for later
 			ReasoningEffort::Budget(val) => {
 				budget = Some(*val); // not very elegant
 				""
@@ -66,14 +71,9 @@ fn insert_anthropic_reasoning(payload: &mut Value, model_name: &str, effort: &Re
 			ReasoningEffort::None => "",
 		};
 
-		// if we have an effort, we set it
+		// if we have an effort, write into the shared output_config map
 		if !effort.is_empty() {
-			payload.x_insert(
-				"output_config",
-				json!({
-					"effort": effort
-				}),
-			)?;
+			output_config.insert("effort".to_string(), json!(effort));
 		}
 	}
 
@@ -130,11 +130,11 @@ fn insert_anthropic_reasoning(payload: &mut Value, model_name: &str, effort: &Re
 // For max model tokens see: https://docs.anthropic.com/en/docs/about-claude/models/overview
 //
 // fall back
-const MAX_TOKENS_64K: u32 = 64000; // claude-opus-4-5 claude-sonnet... (4 and above), claude-haiku..., claude-3-7-sonnet,
+pub(in crate::adapter) const MAX_TOKENS_64K: u32 = 64000; // claude-opus-4-5 claude-sonnet... (4 and above), claude-haiku..., claude-3-7-sonnet,
 // custom
-const MAX_TOKENS_32K: u32 = 32000; // claude-opus-4
-const MAX_TOKENS_8K: u32 = 8192; // claude-3-5-sonnet, claude-3-5-haiku
-const MAX_TOKENS_4K: u32 = 4096; // claude-3-opus, claude-3-haiku
+pub(in crate::adapter) const MAX_TOKENS_32K: u32 = 32000; // claude-opus-4
+pub(in crate::adapter) const MAX_TOKENS_8K: u32 = 8192; // claude-3-5-sonnet, claude-3-5-haiku
+pub(in crate::adapter) const MAX_TOKENS_4K: u32 = 4096; // claude-3-opus, claude-3-haiku
 
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
@@ -212,7 +212,11 @@ impl Adapter for AnthropicAdapter {
 		Self::list_model_names_for_end_target(kind, endpoint, auth).await
 	}
 
-	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
+	async fn all_models(
+		kind: AdapterKind,
+		target: ServiceTarget,
+		web_client: &crate::webc::WebClient,
+	) -> Result<Vec<Model>> {
 		// 使用传入的认证和端点配置
 		let auth = target.auth;
 		let endpoint = target.endpoint;
@@ -259,7 +263,10 @@ impl Adapter for AnthropicAdapter {
 			}
 			Err(e) => {
 				// API 调用失败时记录警告并回退到硬编码模型
-				warn!("Anthropic models API call failed: {}, falling back to hardcoded models", e);
+				warn!(
+					"Anthropic models API call failed: {}, falling back to hardcoded models",
+					e
+				);
 			}
 		}
 
@@ -268,9 +275,10 @@ impl Adapter for AnthropicAdapter {
 			for &model_id in MODELS {
 				let model_name: crate::ModelName = model_id.into();
 				let mut model = Model::new(model_name, model_id);
-				
+
 				// 设置 Claude 模型的通用特性
-				let (max_input_tokens, max_output_tokens) = ModelCapabilities::infer_token_limits(AdapterKind::Anthropic, model_id);
+				let (max_input_tokens, max_output_tokens) =
+					ModelCapabilities::infer_token_limits(AdapterKind::Anthropic, model_id);
 				model = model
 					.with_max_input_tokens(max_input_tokens)
 					.with_max_output_tokens(max_output_tokens)
@@ -278,14 +286,23 @@ impl Adapter for AnthropicAdapter {
 					.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Anthropic, model_id))
 					.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Anthropic, model_id))
 					.with_reasoning(ModelCapabilities::supports_reasoning(AdapterKind::Anthropic, model_id))
-					.with_reasoning_efforts(ModelCapabilities::infer_reasoning_efforts(AdapterKind::Anthropic, model_id))
-					.with_input_modalities(ModelCapabilities::infer_input_modalities(AdapterKind::Anthropic, model_id))
-					.with_output_modalities(ModelCapabilities::infer_output_modalities(AdapterKind::Anthropic, model_id));
+					.with_reasoning_efforts(ModelCapabilities::infer_reasoning_efforts(
+						AdapterKind::Anthropic,
+						model_id,
+					))
+					.with_input_modalities(ModelCapabilities::infer_input_modalities(
+						AdapterKind::Anthropic,
+						model_id,
+					))
+					.with_output_modalities(ModelCapabilities::infer_output_modalities(
+						AdapterKind::Anthropic,
+						model_id,
+					));
 
 				models.push(model);
 			}
 		}
-		
+
 		Ok(models)
 	}
 
@@ -316,9 +333,7 @@ impl Adapter for AnthropicAdapter {
 
 		// -- headers
 		let headers = Headers::from(vec![
-			// headers
 			("x-api-key".to_string(), api_key),
-			("anthropic-beta".to_string(), "effort-2025-11-24".to_string()),
 			("anthropic-version".to_string(), ANTHROPIC_VERSION.to_string()),
 		]);
 
@@ -378,8 +393,12 @@ impl Adapter for AnthropicAdapter {
 		}
 
 		// -- Set the reasoning effort
+		// Both reasoning effort and structured-output format write into `output_config`.
+		// Build a shared map so both contributions end up in the same object.
+		let mut output_config: Map<String, Value> = Map::new();
+
 		if let Some(computed_reasoning_effort) = computed_reasoning_effort {
-			insert_anthropic_reasoning(&mut payload, model_name, &computed_reasoning_effort)?;
+			insert_anthropic_reasoning(&mut payload, &mut output_config, model_name, &computed_reasoning_effort)?;
 		}
 
 		if let Some(cache_control) = options_set.cache_control() {
@@ -389,6 +408,23 @@ impl Adapter for AnthropicAdapter {
 		}
 
 		// -- Add supported ChatOptions
+		if let Some(ChatResponseFormat::JsonSpec(st_json)) = options_set.response_format() {
+			// https://platform.claude.com/docs/en/build-with-claude/structured-outputs#json-outputs
+			// Note: Anthropic's json_schema format does not use a schema name; JsonSpec.name is intentionally omitted.
+			output_config.insert(
+				"format".to_string(),
+				json!({
+					"type": "json_schema",
+					"schema": st_json.schema_with_additional_properties_false(),
+				}),
+			);
+		}
+
+		// Insert output_config once, merging effort + format into a single object.
+		if !output_config.is_empty() {
+			payload.x_insert("output_config", Value::Object(output_config))?;
+		}
+
 		if let Some(temperature) = options_set.temperature() {
 			payload.x_insert("temperature", temperature)?;
 		}
@@ -397,30 +433,7 @@ impl Adapter for AnthropicAdapter {
 			payload.x_insert("stop_sequences", options_set.stop_sequences())?;
 		}
 
-		// const MAX_TOKENS_64K: u32 = 64000; // claude-opus-4-5 claude-sonnet-4, claude-3-7-sonnet,
-		// const MAX_TOKENS_32K: u32 = 32000; // claude-opus-4
-		// const MAX_TOKENS_8K: u32 = 8192; // claude-3-5-sonnet, claude-3-5-haiku
-		// const MAX_TOKENS_4K: u32 = 4096; // claude-3-opus, claude-3-haiku
-		let max_tokens = options_set.max_tokens().unwrap_or_else(|| {
-			// most likely models used, so put first. Also a little wider with `claude-sonnet` (since name from version 4)
-			if model_name.contains("claude-sonnet")
-				|| model_name.contains("claude-haiku")
-				|| model_name.contains("claude-3-7-sonnet")
-				|| model_name.contains("claude-opus-4-5")
-			{
-				MAX_TOKENS_64K
-			} else if model_name.contains("claude-opus-4") {
-				MAX_TOKENS_32K
-			} else if model_name.contains("claude-3-5") {
-				MAX_TOKENS_8K
-			} else if model_name.contains("3-opus") || model_name.contains("3-haiku") {
-				MAX_TOKENS_4K
-			}
-			// for now, fall back on the 64K by default (might want to be more conservative)
-			else {
-				MAX_TOKENS_64K
-			}
-		});
+		let max_tokens = Self::resolve_max_tokens(model_name, &options_set);
 		payload.x_insert("max_tokens", max_tokens)?; // required for Anthropic
 
 		if let Some(top_p) = options_set.top_p() {
@@ -565,12 +578,16 @@ impl AnthropicAdapter {
 		}
 
 		// 使用 ModelCapabilities 系统推断模型能力
-		let (max_input_tokens, max_output_tokens) = ModelCapabilities::infer_token_limits(AdapterKind::Anthropic, &model_id);
+		let (max_input_tokens, max_output_tokens) =
+			ModelCapabilities::infer_token_limits(AdapterKind::Anthropic, &model_id);
 		model = model
 			.with_max_input_tokens(max_input_tokens)
 			.with_max_output_tokens(max_output_tokens)
 			.with_streaming(ModelCapabilities::supports_streaming(AdapterKind::Anthropic, &model_id))
-			.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::Anthropic, &model_id))
+			.with_tool_calls(ModelCapabilities::supports_tool_calls(
+				AdapterKind::Anthropic,
+				&model_id,
+			))
 			.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::Anthropic, &model_id));
 
 		// 设置推理能力
@@ -582,7 +599,7 @@ impl AnthropicAdapter {
 		// 设置输入输出模态
 		let input_modalities = ModelCapabilities::infer_input_modalities(AdapterKind::Anthropic, &model_id);
 		let output_modalities = ModelCapabilities::infer_output_modalities(AdapterKind::Anthropic, &model_id);
-		
+
 		model = model
 			.with_input_modalities(input_modalities)
 			.with_output_modalities(output_modalities);
@@ -590,7 +607,32 @@ impl AnthropicAdapter {
 		Ok(model)
 	}
 
-	pub(super) fn into_usage(mut usage_value: Value) -> Usage {
+	/// Resolves the max_tokens value for an Anthropic model, using the user-provided
+	/// value if set, or a model-appropriate default.
+	pub(in crate::adapter) fn resolve_max_tokens(model_name: &str, options_set: &ChatOptionsSet) -> u32 {
+		options_set.max_tokens().unwrap_or_else(|| {
+			// most likely models used, so put first. Also a little wider with `claude-sonnet` (since name from version 4)
+			if model_name.contains("claude-sonnet")
+				|| model_name.contains("claude-haiku")
+				|| model_name.contains("claude-3-7-sonnet")
+				|| model_name.contains("claude-opus-4-5")
+			{
+				MAX_TOKENS_64K
+			} else if model_name.contains("claude-opus-4") {
+				MAX_TOKENS_32K
+			} else if model_name.contains("claude-3-5") {
+				MAX_TOKENS_8K
+			} else if model_name.contains("3-opus") || model_name.contains("3-haiku") {
+				MAX_TOKENS_4K
+			}
+			// for now, fall back on the 64K by default (might want to be more conservative)
+			else {
+				MAX_TOKENS_64K
+			}
+		})
+	}
+
+	pub(in crate::adapter) fn into_usage(mut usage_value: Value) -> Usage {
 		// IMPORTANT: For Anthropic, the `input_tokens` does not include `cache_creation_input_tokens` or `cache_read_input_tokens`.
 		// Therefore, it must be normalized in the OpenAI style, where it includes both cached and written tokens (for symmetry).
 		let input_tokens: i32 = usage_value.x_take("input_tokens").ok().unwrap_or(0);
@@ -635,7 +677,7 @@ impl AnthropicAdapter {
 
 	/// Takes the GenAI ChatMessages and constructs the System string and JSON Messages for Anthropic.
 	/// - Will push the `ChatRequest.system` and system message to `AnthropicRequestParts.system`
-	fn into_anthropic_request_parts(chat_req: ChatRequest) -> Result<AnthropicRequestParts> {
+	pub(in crate::adapter) fn into_anthropic_request_parts(chat_req: ChatRequest) -> Result<AnthropicRequestParts> {
 		let mut messages: Vec<Value> = Vec::new();
 		// (content, cache_control)
 		let mut systems: Vec<(String, Option<CacheControl>)> = Vec::new();
@@ -775,12 +817,20 @@ impl AnthropicAdapter {
 							}
 							ContentPart::ToolCall(tool_call) => {
 								has_tool_use = true;
+								// Anthropic API requires `input` to be an object, never null.
+								// Streaming parsers may produce null arguments when deltas are
+								// missing or empty; fall back to an empty object in that case.
+								let input = if tool_call.fn_arguments.is_null() {
+									Value::Object(Map::new())
+								} else {
+									tool_call.fn_arguments
+								};
 								// see: https://docs.anthropic.com/en/docs/build-with-claude/tool-use#example-of-successful-tool-result
 								values.push(json!({
 									"type": "tool_use",
 									"id": tool_call.call_id,
 									"name": tool_call.fn_name,
-									"input": tool_call.fn_arguments,
+									"input": input,
 								}));
 							}
 							// Unsupported for assistant role in Anthropic message content
@@ -882,6 +932,7 @@ impl AnthropicAdapter {
 			description,
 			schema,
 			config,
+			..
 		} = tool;
 
 		let name = match name {
@@ -1015,10 +1066,10 @@ fn apply_cache_control_to_parts(cache_control: Option<&CacheControl>, parts: Vec
 	parts
 }
 
-struct AnthropicRequestParts {
-	system: Option<Value>,
-	messages: Vec<Value>,
-	tools: Option<Vec<Value>>,
+pub(in crate::adapter) struct AnthropicRequestParts {
+	pub system: Option<Value>,
+	pub messages: Vec<Value>,
+	pub tools: Option<Vec<Value>>,
 }
 
 // endregion: --- Support
@@ -1028,6 +1079,54 @@ struct AnthropicRequestParts {
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use crate::ServiceTarget;
+	use crate::adapter::{Adapter, ServiceType};
+	use crate::chat::{ChatOptions, ChatRequest, JsonSpec};
+	use crate::resolver::AuthData;
+
+	/// Regression guard: when both `reasoning_effort` and `JsonSpec` response format are set
+	/// on a model that uses the `output_config` effort API (e.g. `claude-sonnet-4-6`), both
+	/// `effort` and `format` must appear inside the same `output_config` JSON object.
+	#[test]
+	fn test_output_config_merges_effort_and_format() {
+		let chat_options = ChatOptions {
+			reasoning_effort: Some(ReasoningEffort::High),
+			response_format: Some(ChatResponseFormat::JsonSpec(JsonSpec::new(
+				"anthropic_ignores_name", // NOTE: Anthropic doesn't recognize a "name" field
+				json!({"type": "object", "properties": {}}),
+			))),
+			..Default::default()
+		};
+
+		let model_iden = ModelIden::new(AdapterKind::Anthropic, "claude-sonnet-4-6");
+		let target = ServiceTarget {
+			endpoint: AnthropicAdapter::default_endpoint(),
+			auth: AuthData::from_single("test-key"),
+			model: model_iden,
+		};
+		let options_set = ChatOptionsSet::default().with_chat_options(Some(&chat_options));
+
+		let result = AnthropicAdapter::to_web_request_data(
+			target,
+			ServiceType::Chat,
+			ChatRequest::from_user("hello"),
+			options_set,
+		);
+
+		let web_req = result.expect("to_web_request_data should succeed");
+		let output_config = web_req.payload.get("output_config").expect("output_config must be present");
+
+		assert_eq!(
+			output_config.get("effort").and_then(|v| v.as_str()),
+			Some("high"),
+			"effort must be present in output_config"
+		);
+		assert_eq!(
+			output_config.get("format").and_then(|f| f.get("type")).and_then(|v| v.as_str()),
+			Some("json_schema"),
+			"format.type must be present in output_config"
+		);
+	}
 
 	#[test]
 	fn test_cache_control_to_json_ephemeral() {

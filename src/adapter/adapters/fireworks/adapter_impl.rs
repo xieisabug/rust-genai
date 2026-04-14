@@ -1,9 +1,9 @@
-use crate::{Model, ModelIden};
 use crate::adapter::openai::{OpenAIAdapter, ToWebRequestCustom};
 use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse};
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
+use crate::{Model, ModelIden};
 use crate::{Result, ServiceTarget};
 use reqwest::RequestBuilder;
 
@@ -44,7 +44,11 @@ impl Adapter for FireworksAdapter {
 		OpenAIAdapter::list_model_names_for_end_target(kind, endpoint, auth).await
 	}
 
-	async fn all_models(_kind: AdapterKind, _target: ServiceTarget, _web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
+	async fn all_models(
+		_kind: AdapterKind,
+		_target: ServiceTarget,
+		_web_client: &crate::webc::WebClient,
+	) -> Result<Vec<Model>> {
 		// For fireworks, there are too many models to list.
 		// The models are handled dynamically based on the model name.
 		// Return empty vector for now since the MODELS constant is empty.

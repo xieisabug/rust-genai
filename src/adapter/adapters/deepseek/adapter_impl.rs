@@ -1,16 +1,16 @@
+use crate::Model;
 use crate::ModelIden;
-use crate::adapter::openai::OpenAIAdapter;
+use crate::adapter::ModelCapabilities;
 use crate::adapter::adapters::support::get_api_key;
+use crate::adapter::openai::OpenAIAdapter;
 use crate::adapter::{Adapter, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{ChatOptionsSet, ChatRequest, ChatResponse, ChatStreamResponse};
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::WebResponse;
 use crate::{Error, Headers, Result, ServiceTarget};
-use crate::{Model};
 use reqwest::RequestBuilder;
 use serde_json::Value;
 use value_ext::JsonValueExt;
-use crate::adapter::ModelCapabilities;
 
 pub struct DeepSeekAdapter;
 const MODELS: &[&str] = &["deepseek-chat", "deepseek-reasoner"];
@@ -39,7 +39,11 @@ impl Adapter for DeepSeekAdapter {
 		OpenAIAdapter::list_model_names_for_end_target(kind, endpoint, auth).await
 	}
 
-	async fn all_models(kind: AdapterKind, target: ServiceTarget, web_client: &crate::webc::WebClient) -> Result<Vec<Model>> {
+	async fn all_models(
+		kind: AdapterKind,
+		target: ServiceTarget,
+		web_client: &crate::webc::WebClient,
+	) -> Result<Vec<Model>> {
 		// 使用默认的认证和端点配置
 		let auth = target.auth;
 		let endpoint = target.endpoint;
@@ -80,11 +84,12 @@ impl Adapter for DeepSeekAdapter {
 		for model_id in model_ids {
 			let model_name: crate::ModelName = model_id.clone().into();
 			let mut model = Model::new(model_name, model_id.clone());
-			
+
 			// 设置 DeepSeek 模型的特性
-			let (max_input_tokens, max_output_tokens) = ModelCapabilities::infer_token_limits(AdapterKind::DeepSeek, &model_id);
+			let (max_input_tokens, max_output_tokens) =
+				ModelCapabilities::infer_token_limits(AdapterKind::DeepSeek, &model_id);
 			let supports_reasoning = ModelCapabilities::supports_reasoning(AdapterKind::DeepSeek, &model_id);
-			
+
 			model = model
 				.with_max_input_tokens(max_input_tokens)
 				.with_max_output_tokens(max_output_tokens)
@@ -92,24 +97,24 @@ impl Adapter for DeepSeekAdapter {
 				.with_tool_calls(ModelCapabilities::supports_tool_calls(AdapterKind::DeepSeek, &model_id))
 				.with_json_mode(ModelCapabilities::supports_json_mode(AdapterKind::DeepSeek, &model_id))
 				.with_reasoning(supports_reasoning);
-			
+
 			// 设置输入输出模态
 			let input_modalities = ModelCapabilities::infer_input_modalities(AdapterKind::DeepSeek, &model_id);
 			let output_modalities = ModelCapabilities::infer_output_modalities(AdapterKind::DeepSeek, &model_id);
-			
+
 			model = model
 				.with_input_modalities(input_modalities)
 				.with_output_modalities(output_modalities);
-			
+
 			// 如果支持推理，设置推理努力等级
 			if supports_reasoning {
 				let reasoning_efforts = ModelCapabilities::infer_reasoning_efforts(AdapterKind::DeepSeek, &model_id);
 				model = model.with_reasoning_efforts(reasoning_efforts);
 			}
-			
+
 			models.push(model);
 		}
-		
+
 		Ok(models)
 	}
 
@@ -167,7 +172,7 @@ impl DeepSeekAdapter {
 	/// DeepSeek API uses OpenAI-compatible format: {"object": "list", "data": [{"id": "deepseek-chat", ...}, ...]}
 	fn parse_models_response(mut web_response: crate::webc::WebResponse) -> Result<Vec<String>> {
 		let models_array: Vec<Value> = web_response.body.x_take("data")?;
-		
+
 		let mut model_ids = Vec::new();
 		for mut model_data in models_array {
 			if let Ok(model_id) = model_data.x_take::<String>("id") {
@@ -177,14 +182,14 @@ impl DeepSeekAdapter {
 				}
 			}
 		}
-		
+
 		// If no valid models found in API response, return error to trigger fallback
 		if model_ids.is_empty() {
 			return Err(Error::InvalidJsonResponseElement {
 				info: "No valid DeepSeek models found in API response",
 			});
 		}
-		
+
 		Ok(model_ids)
 	}
 }

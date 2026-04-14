@@ -30,7 +30,9 @@ genai (crate root / lib.rs)
 - **ModelSpec**: Specifies a model at three resolution levels: `Name`, `Iden`, or `Target`.
 - **ServiceTarget**: Fully resolved call target: `ModelIden` + `Endpoint` + `AuthData`.
 - **Resolvers**: User hooks to customize model mapping, authentication, and service endpoints.
-- **AdapterKind**: Supported providers: `OpenAI`, `OpenAIResp`, `Gemini`, `Anthropic`, `Fireworks`, `Together`, `Groq`, `Mimo`, `Nebius`, `Xai`, `DeepSeek`, `Zai`, `BigModel`, `Cohere`, `Ollama`.
+- **AdapterKind**: Supported providers: `OpenAI`, `OpenAIResp`, `Gemini`, `Anthropic`, `Fireworks`, `Together`, `Groq`, `Mimo`, `Nebius`, `Xai`, `DeepSeek`, `Zai`, `BigModel`, `Cohere`, `Ollama`, `OllamaCloud`, `GithubCopilot`.
+  - `GithubCopilot` is a GitHub Models gateway with multi-publisher namespaced models such as `github_copilot::openai/gpt-4.1-mini`, `github_copilot::anthropic/claude-sonnet-4-6`, and `github_copilot::google/gemini-2.5-pro`.
+  - `OllamaCloud` is the hosted Ollama Cloud service (`ollama.com`). Uses the same native Ollama protocol as the local `Ollama` adapter but authenticates with `Authorization: Bearer $OLLAMA_API_KEY`. Use via `ollama_cloud::model_name` namespace (e.g., `ollama_cloud::gemma3:4b`).
 
 ## Client & Configuration
 
@@ -260,8 +262,8 @@ All fields are `Option<T>` (unset = defer to client default or provider default)
 
 Provider-specific hint for reasoning intensity/budget.
 
-- Variants: `None`, `Low`, `Medium`, `High`, `Budget(u32)`, `Minimal` (legacy, for <= gpt-5).
-- `variant_name()`: Returns lowercase name (`"none"`, `"low"`, `"medium"`, `"high"`, `"budget"`, `"minimal"`).
+- Variants: `None`, `Low`, `Medium`, `High`, `XHigh`, `Max`, `Budget(u32)`, `Minimal` (legacy, for <= gpt-5).
+- `variant_name()`: Returns lowercase name (`"none"`, `"low"`, `"medium"`, `"high"`, `"xhigh"`, `"max"`, `"budget"`, `"minimal"`).
 - `as_keyword()`: Returns `Option<&'static str>` (None for `Budget`).
 - `from_keyword(name)`: Parses keyword string.
 - `from_model_name(model_name)`: If model name ends with `-<effort>`, returns `(Some(effort), trimmed_name)`.
@@ -327,11 +329,30 @@ OpenAI service tier preference for flex processing.
 
 ### `Tool`
 
-- `name: String`, `description: Option<String>`, `schema: Option<Value>` (JSON Schema), `config: Option<Value>`.
+- `name: ToolName`, `description: Option<String>`, `schema: Option<Value>` (JSON Schema), `config: Option<ToolConfig>`.
 - `Tool::new(name)`: Constructor.
+- `Tool::new_web_search()`: Constructor for the built-in web search tool.
 - `with_description(desc)`, `with_schema(parameters)`, `with_config(config)`: Chainable setters.
 - `size()`: Approximate in-memory size.
 - `config`: Optional provider-specific config.
+
+### `ToolName`
+
+- `WebSearch`: Built-in provider web-search tool.
+- `Custom(String)`: User-defined tool name.
+- `as_str()`: Returns the normalized display name.
+- Implements `Display`, `AsRef<str>`, `From<String>`, `From<&String>`, `From<&str>`.
+- Serialization:
+  - `Custom("get_weather")` -> `"get_weather"`
+  - `WebSearch` -> `{"WebSearch": null}`
+
+### `ToolConfig`
+
+- `WebSearch(WebSearchConfig)`: Typed config for the built-in web-search tool.
+- `Custom(serde_json::Value)`: Arbitrary JSON config for custom tools.
+- Serialization:
+  - `Custom(json)` -> raw JSON value
+  - `WebSearch(config)` -> `{"WebSearch": {...}}`
 
 ### `ToolCall`
 
@@ -466,7 +487,7 @@ Single-value-per-name HTTP header map.
 
 Enum identifying the AI provider adapter.
 
-Variants: `OpenAI`, `OpenAIResp`, `Gemini`, `Anthropic`, `Fireworks`, `Together`, `Groq`, `Mimo`, `Nebius`, `Xai`, `DeepSeek`, `Zai`, `BigModel`, `Cohere`, `Ollama`.
+Variants: `OpenAI`, `OpenAIResp`, `Gemini`, `Anthropic`, `Fireworks`, `Together`, `Groq`, `Mimo`, `Nebius`, `Xai`, `DeepSeek`, `Zai`, `BigModel`, `Cohere`, `Ollama`, `OllamaCloud`, `GithubCopilot`.
 
 - `as_str()`: Display name (e.g., `"OpenAI"`, `"xAi"`).
 - `as_lower_str()`: Lowercase name (e.g., `"openai"`, `"xai"`).
@@ -490,7 +511,7 @@ Variants: `OpenAI`, `OpenAIResp`, `Gemini`, `Anthropic`, `Fireworks`, `Together`
   - `glm*` -> `Zai`.
   - Fallback -> `Ollama`.
 - **Namespacing**: `namespace::model_name` (e.g., `together::meta-llama/...`, `nebius::Qwen/...`).
-  - Namespace matches adapter lowercase name (e.g., `openai::`, `gemini::`, `anthropic::`, `fireworks::`, `together::`, `groq::`, `mimo::`, `nebius::`, `xai::`, `deepseek::`, `zai::`, `bigmodel::`, `aliyun::`, `cohere::`, `ollama::`, `openai_resp::`)
+  - Namespace matches adapter lowercase name (e.g., `openai::`, `gemini::`, `anthropic::`, `fireworks::`, `together::`, `groq::`, `mimo::`, `nebius::`, `xai::`, `deepseek::`, `zai::`, `bigmodel::`, `aliyun::`, `cohere::`, `ollama::`, `ollama_cloud::`, `openai_resp::`, `github_copilot::`)
   - Special: `coding::` namespace maps to `Zai` adapter.
 - **Ollama Fallback**: Unrecognized non-namespaced names default to `Ollama` adapter (localhost:11434).
 - **Reasoning Normalization**: Automatic extraction for DeepSeek/Ollama `<think>` blocks when `normalize_reasoning_content` is enabled.
