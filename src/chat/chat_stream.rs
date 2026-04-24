@@ -110,7 +110,7 @@ pub struct StreamEnd {
 	/// Normalised stop reason captured at stream end (see [`StopReason`]).
 	pub captured_stop_reason: Option<StopReason>,
 
-	/// Captured final content (text and tool calls) if `ChatOptions.capture_content`
+	/// Captured final content (text, binary, and tool calls) if `ChatOptions.capture_content`
 	/// or `capture_tool_calls` is enabled.
 	/// Note: Since 0.4.0 this includes tool calls as well (for API symmetry with `ChatResponse`);
 	///       use `.captured_tool_calls()` or `.captured_texts()`.
@@ -217,10 +217,22 @@ impl StreamEnd {
 		Some(captured_content.tool_calls())
 	}
 
+	/// Returns all captured binaries, if any.
+	pub fn captured_binaries(&self) -> Option<Vec<&crate::chat::Binary>> {
+		let captured_content = self.captured_content.as_ref()?;
+		Some(captured_content.binaries())
+	}
+
 	/// Consumes `self` and returns all captured tool calls, if any.
 	pub fn captured_into_tool_calls(self) -> Option<Vec<ToolCall>> {
 		let captured_content = self.captured_content?;
 		Some(captured_content.into_tool_calls())
+	}
+
+	/// Consumes `self` and returns all captured binaries, if any.
+	pub fn captured_into_binaries(self) -> Option<Vec<crate::chat::Binary>> {
+		let captured_content = self.captured_content?;
+		Some(captured_content.into_binaries())
 	}
 
 	/// Returns all captured thought signatures, if any.

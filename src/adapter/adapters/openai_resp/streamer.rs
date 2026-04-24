@@ -5,7 +5,7 @@ use crate::chat::{ChatOptionsSet, ContentPart, StopReason, ToolCall};
 use crate::webc::{Event, EventSourceStream};
 use crate::{Error, ModelIden, Result};
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -22,6 +22,7 @@ pub struct OpenAIRespStreamer {
 
 	in_progress_tool_calls: BTreeMap<usize, ToolCall>,
 	completed_output_items: BTreeMap<usize, Value>,
+	partial_image_items: BTreeMap<usize, Value>,
 	streamed_text_parts: BTreeSet<(usize, usize)>,
 }
 
@@ -84,6 +85,17 @@ enum RespStreamEvent {
 		delta: String,
 	},
 
+	#[serde(rename = "response.image_generation_call.partial_image")]
+	ImageGenerationCallPartialImage {
+		#[serde(default)]
+		output_index: usize,
+		#[serde(default)]
+		item_id: String,
+		#[serde(default)]
+		output_format: Option<String>,
+		partial_image_b64: String,
+	},
+
 	#[serde(rename = "response.completed")]
 	ResponseCompleted { response: RespResponse },
 
@@ -106,6 +118,7 @@ impl OpenAIRespStreamer {
 			captured_data: Default::default(),
 			in_progress_tool_calls: BTreeMap::new(),
 			completed_output_items: BTreeMap::new(),
+			partial_image_items: BTreeMap::new(),
 			streamed_text_parts: BTreeSet::new(),
 		}
 	}
@@ -124,9 +137,13 @@ impl OpenAIRespStreamer {
 	}
 
 	fn finalize_output_capture(&mut self, response_output: Option<Vec<Value>>) -> Result<FinalOutputCapture> {
-		let output_items = response_output
-			.filter(|items| !items.is_empty())
-			.unwrap_or_else(|| std::mem::take(&mut self.completed_output_items).into_values().collect());
+		let output_items = response_output.filter(|items| !items.is_empty()).unwrap_or_else(|| {
+			let mut output_items = std::mem::take(&mut self.completed_output_items);
+			for (output_index, partial_item) in std::mem::take(&mut self.partial_image_items) {
+				output_items.entry(output_index).or_insert(partial_item);
+			}
+			output_items.into_values().collect()
+		});
 
 		let mut parsed_output = parse_resp_output(output_items)?;
 		let fallback_tool_calls = self.take_tool_calls();
@@ -317,6 +334,29 @@ impl futures::Stream for OpenAIRespStreamer {
 								let tool_call_to_send = tool_call.clone();
 								return Poll::Ready(Some(Ok(InterStreamEvent::ToolCallChunk(tool_call_to_send))));
 							}
+							continue;
+						}
+
+						RespStreamEvent::ImageGenerationCallPartialImage {
+							output_index,
+							item_id,
+							output_format,
+							partial_image_b64,
+						} => {
+							if partial_image_b64.is_empty() {
+								continue;
+							}
+
+							self.partial_image_items.insert(
+								output_index,
+								json!({
+									"id": item_id,
+									"type": "image_generation_call",
+									"status": "partial",
+									"output_format": output_format,
+									"result": partial_image_b64,
+								}),
+							);
 							continue;
 						}
 

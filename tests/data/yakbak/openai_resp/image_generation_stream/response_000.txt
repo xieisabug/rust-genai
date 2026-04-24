@@ -10,17 +10,20 @@ data: {"type":"response.output_item.done","item":{"id":"rs_test","type":"reasoni
 event: response.output_item.added
 data: {"type":"response.output_item.added","item":{"id":"ig_test","type":"image_generation_call","status":"in_progress"},"output_index":1,"sequence_number":3}
 
+event: response.image_generation_call.partial_image
+data: {"type":"response.image_generation_call.partial_image","output_index":1,"item_id":"ig_test","output_format":"png","partial_image_b64":"iVBORw0KGgoAAAANSUhEUg==","sequence_number":4}
+
 event: response.output_item.done
-data: {"type":"response.output_item.done","item":{"id":"ig_test","type":"image_generation_call","status":"completed","action":"generate","output_format":"png","result":"iVBORw0KGgo="},"output_index":1,"sequence_number":4}
+data: {"type":"response.output_item.done","item":{"id":"ig_test","type":"image_generation_call","status":"completed","action":"generate","output_format":"png","result":"iVBORw0KGgo="},"output_index":1,"sequence_number":5}
 
 event: response.output_item.added
-data: {"type":"response.output_item.added","item":{"id":"msg_test","type":"message","status":"in_progress","content":[],"role":"assistant"},"output_index":2,"sequence_number":5}
+data: {"type":"response.output_item.added","item":{"id":"msg_test","type":"message","status":"in_progress","content":[],"role":"assistant"},"output_index":2,"sequence_number":6}
 
 event: response.output_text.done
-data: {"type":"response.output_text.done","output_index":2,"content_index":0,"text":"","sequence_number":6}
+data: {"type":"response.output_text.done","output_index":2,"content_index":0,"text":"","sequence_number":7}
 
 event: response.output_item.done
-data: {"type":"response.output_item.done","item":{"id":"msg_test","type":"message","status":"completed","content":[{"type":"output_text","text":""}],"role":"assistant"},"output_index":2,"sequence_number":7}
+data: {"type":"response.output_item.done","item":{"id":"msg_test","type":"message","status":"completed","content":[{"type":"output_text","text":""}],"role":"assistant"},"output_index":2,"sequence_number":8}
 
 event: response.completed
-data: {"type":"response.completed","response":{"id":"resp_test_image_123","status":"completed","error":null,"max_output_tokens":null,"model":"gpt-image-2","output":[],"usage":{"input_tokens":12,"input_tokens_details":{"cached_tokens":0},"output_tokens":3,"output_tokens_details":{"reasoning_tokens":1},"total_tokens":15}},"sequence_number":8}
+data: {"type":"response.completed","response":{"id":"resp_test_image_123","status":"completed","error":null,"max_output_tokens":null,"model":"gpt-image-2","output":[],"usage":{"input_tokens":12,"input_tokens_details":{"cached_tokens":0},"output_tokens":3,"output_tokens_details":{"reasoning_tokens":1},"total_tokens":15}},"sequence_number":9}

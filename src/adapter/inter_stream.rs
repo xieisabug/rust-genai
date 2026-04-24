@@ -18,7 +18,7 @@ pub struct InterStreamEnd {
 	// When `ChatOptions..capture_content == true`
 	pub captured_text_content: Option<String>,
 
-	// When the provider returns final structured content (e.g. images) at stream end.
+	// When the provider returns final structured content (e.g. images/binary) at stream end.
 	pub captured_content_parts: Option<Vec<ContentPart>>,
 
 	// When `ChatOptions..capture_reasoning_content == true`
