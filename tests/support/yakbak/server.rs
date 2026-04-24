@@ -294,7 +294,7 @@ fn infer_content_type(body: &str) -> &'static str {
 	let trimmed = body.trim_start();
 	if trimmed.starts_with('{') || trimmed.starts_with('[') {
 		"application/json"
-	} else if trimmed.starts_with("event:") || trimmed.starts_with("data:") {
+	} else if trimmed.starts_with("event:") || trimmed.starts_with("data:") || trimmed.starts_with(':') {
 		"text/event-stream"
 	} else {
 		"text/plain"

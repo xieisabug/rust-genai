@@ -5,7 +5,7 @@
 //!
 //! NOTE: This might be removed at some point as it may not be needed, and we could go directly to the GenAI stream.
 
-use crate::chat::{StopReason, Usage};
+use crate::chat::{ContentPart, StopReason, Usage};
 
 #[derive(Debug, Default)]
 pub struct InterStreamEnd {
@@ -17,6 +17,9 @@ pub struct InterStreamEnd {
 
 	// When `ChatOptions..capture_content == true`
 	pub captured_text_content: Option<String>,
+
+	// When the provider returns final structured content (e.g. images) at stream end.
+	pub captured_content_parts: Option<Vec<ContentPart>>,
 
 	// When `ChatOptions..capture_reasoning_content == true`
 	pub captured_reasoning_content: Option<String>,

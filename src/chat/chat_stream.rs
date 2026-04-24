@@ -127,11 +127,11 @@ impl From<InterStreamEnd> for StreamEnd {
 	fn from(inter_end: InterStreamEnd) -> Self {
 		let captured_text_content = inter_end.captured_text_content;
 		let mut captured_tool_calls = inter_end.captured_tool_calls;
+		let mut captured_content = inter_end.captured_content_parts.map(MessageContent::from_parts);
 
 		// -- create public captured_content
 		// Ordering policy: ThoughtSignature -> Text -> ToolCall
 		// This matches provider expectations (e.g., Gemini 3 requires thought first).
-		let mut captured_content: Option<MessageContent> = None;
 		if let Some(captured_thoughts) = inter_end.captured_thought_signatures {
 			let thoughts_content = captured_thoughts
 				.into_iter()
@@ -317,6 +317,7 @@ mod tests {
 	fn test_stream_end_preserves_captured_stop_reason() {
 		let inter_end = InterStreamEnd {
 			captured_stop_reason: Some(StopReason::Completed("stop".to_string())),
+			captured_content_parts: None,
 			..Default::default()
 		};
 		let stream_end = StreamEnd::from(inter_end);

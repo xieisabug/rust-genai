@@ -2,7 +2,7 @@ use crate::adapter::ModelCapabilities;
 use crate::adapter::adapters::support::get_api_key;
 use crate::adapter::openai::OpenAIAdapter;
 use crate::adapter::openai_resp::OpenAIRespStreamer;
-use crate::adapter::openai_resp::resp_types::RespResponse;
+use crate::adapter::openai_resp::resp_types::{RespResponse, parse_resp_output};
 use crate::adapter::{Adapter, AdapterDispatcher, AdapterKind, ServiceType, WebRequestData};
 use crate::chat::{
 	CacheControl, ChatOptionsSet, ChatRequest, ChatResponse, ChatResponseFormat, ChatRole, ChatStream,
@@ -288,15 +288,9 @@ impl Adapter for OpenAIRespAdapter {
 		// -- Capture the usage
 		let usage = resp.usage.map(Usage::from).unwrap_or_default();
 
-		// -- Capture the content
-		let mut content: MessageContent = MessageContent::default();
-		let reasoning_content: Option<String> = None;
-
-		// -- Extract the content message
-		for output_item in resp.output {
-			let parts = ContentPart::from_resp_output_item(output_item)?;
-			content.extend(parts);
-		}
+		let parsed_output = parse_resp_output(resp.output)?;
+		let content = MessageContent::from_parts(parsed_output.content);
+		let reasoning_content = parsed_output.reasoning_content;
 
 		Ok(ChatResponse {
 			content,

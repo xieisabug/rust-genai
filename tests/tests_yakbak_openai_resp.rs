@@ -236,3 +236,55 @@ async fn test_yakbak_openai_resp_multi_tool_ordering() -> TestResult<()> {
 
 	Ok(())
 }
+
+#[tokio::test]
+async fn test_yakbak_openai_resp_image_generation_stream() -> TestResult<()> {
+	let (client, _server) = replay_client("openai_resp", "image_generation_stream").await?;
+
+	let chat_req = ChatRequest::from_user("Generate an image.");
+	let options = ChatOptions::default()
+		.with_capture_content(true)
+		.with_capture_reasoning_content(true)
+		.with_capture_usage(true);
+
+	let stream_res = client
+		.exec_chat_stream("openai_resp::gpt-image-2", chat_req, Some(&options))
+		.await?;
+	let extract = extract_stream_end(stream_res.stream).await?;
+
+	assert!(
+		extract.content.is_none(),
+		"image generation stream should not emit text chunks"
+	);
+
+	let captured_content = extract
+		.stream_end
+		.captured_content
+		.as_ref()
+		.ok_or("Should have captured content")?;
+	let binaries = captured_content.binaries();
+	assert_eq!(binaries.len(), 1, "Expected exactly one generated image");
+	assert_eq!(binaries[0].content_type, "image/png");
+	match &binaries[0].source {
+		BinarySource::Base64(data) => assert!(data.starts_with("iVBORw0KGgo"), "Expected PNG base64 payload"),
+		BinarySource::Url(_) => return Err("Generated image should be captured as base64".into()),
+	}
+
+	let thought_sigs = extract
+		.stream_end
+		.captured_thought_signatures()
+		.ok_or("Should have thought signatures")?;
+	assert_eq!(thought_sigs.len(), 1);
+	assert_eq!(thought_sigs[0], "enc_sig_123_done");
+
+	let usage = extract.stream_end.captured_usage.as_ref().ok_or("Should have usage")?;
+	assert_eq!(usage.prompt_tokens, Some(12));
+	assert_eq!(usage.completion_tokens, Some(3));
+	assert_eq!(usage.total_tokens, Some(15));
+	assert_eq!(
+		extract.stream_end.captured_response_id.as_deref(),
+		Some("resp_test_image_123")
+	);
+
+	Ok(())
+}

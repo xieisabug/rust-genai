@@ -1,12 +1,12 @@
 use crate::adapter::adapters::support::{StreamerCapturedData, StreamerOptions};
 use crate::adapter::inter_stream::{InterStreamEnd, InterStreamEvent};
-use crate::adapter::openai_resp::resp_types::RespResponse;
-use crate::chat::{ChatOptionsSet, StopReason, ToolCall};
+use crate::adapter::openai_resp::resp_types::{RespResponse, parse_resp_output};
+use crate::chat::{ChatOptionsSet, ContentPart, StopReason, ToolCall};
 use crate::webc::{Event, EventSourceStream};
 use crate::{Error, ModelIden, Result};
 use serde::Deserialize;
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use value_ext::JsonValueExt;
@@ -21,6 +21,8 @@ pub struct OpenAIRespStreamer {
 	captured_data: StreamerCapturedData,
 
 	in_progress_tool_calls: BTreeMap<usize, ToolCall>,
+	completed_output_items: BTreeMap<usize, Value>,
+	streamed_text_parts: BTreeSet<(usize, usize)>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -35,28 +37,42 @@ enum RespStreamEvent {
 	#[serde(rename = "response.output_item.added")]
 	OutputItemAdded { output_index: usize, item: Value },
 
+	#[serde(rename = "response.output_item.done")]
+	OutputItemDone { output_index: usize, item: Value },
+
 	#[serde(rename = "response.content_part.added")]
 	ContentPartAdded {
+		#[serde(rename = "output_index", default)]
 		_output_index: usize,
+		#[serde(rename = "content_index", default)]
 		_content_index: usize,
 		#[serde(default)]
 		_part: Value,
 	},
 
+	#[serde(rename = "response.output_text.done")]
+	OutputTextDone {
+		#[serde(default)]
+		output_index: usize,
+		#[serde(default)]
+		content_index: usize,
+		text: String,
+	},
+
 	#[serde(rename = "response.output_text.delta")]
 	OutputTextDelta {
 		#[serde(default)]
-		_output_index: usize,
+		output_index: usize,
 		#[serde(default)]
-		_content_index: usize,
+		content_index: usize,
 		delta: String,
 	},
 
 	#[serde(rename = "response.reasoning_text.delta")]
 	ReasoningTextDelta {
-		#[serde(default)]
+		#[serde(rename = "output_index", default)]
 		_output_index: usize,
-		#[serde(default)]
+		#[serde(rename = "content_index", default)]
 		_content_index: usize,
 		delta: String,
 	},
@@ -89,8 +105,89 @@ impl OpenAIRespStreamer {
 			options: StreamerOptions::new(model_iden, options_set),
 			captured_data: Default::default(),
 			in_progress_tool_calls: BTreeMap::new(),
+			completed_output_items: BTreeMap::new(),
+			streamed_text_parts: BTreeSet::new(),
 		}
 	}
+
+	fn take_tool_calls(&mut self) -> Vec<ToolCall> {
+		let mut tool_calls = Vec::new();
+		for (_, mut tc) in std::mem::take(&mut self.in_progress_tool_calls) {
+			if let Some(args_str) = tc.fn_arguments.as_str()
+				&& let Ok(args_val) = serde_json::from_str(args_str)
+			{
+				tc.fn_arguments = args_val;
+			}
+			tool_calls.push(tc);
+		}
+		tool_calls
+	}
+
+	fn finalize_output_capture(&mut self, response_output: Option<Vec<Value>>) -> Result<FinalOutputCapture> {
+		let output_items = response_output
+			.filter(|items| !items.is_empty())
+			.unwrap_or_else(|| std::mem::take(&mut self.completed_output_items).into_values().collect());
+
+		let mut parsed_output = parse_resp_output(output_items)?;
+		let fallback_tool_calls = self.take_tool_calls();
+		let existing_tool_call_ids = parsed_output
+			.content
+			.iter()
+			.filter_map(|part| part.as_tool_call().map(|tc| tc.call_id.clone()))
+			.collect::<BTreeSet<_>>();
+		parsed_output.content.extend(
+			fallback_tool_calls
+				.into_iter()
+				.filter(|tc| !existing_tool_call_ids.contains(&tc.call_id))
+				.map(ContentPart::ToolCall),
+		);
+
+		let mut content_parts = Vec::new();
+		for part in parsed_output.content {
+			match part {
+				ContentPart::Text(_) | ContentPart::Binary(_) if self.options.capture_content => {
+					content_parts.push(part)
+				}
+				ContentPart::ToolCall(_) if self.options.capture_tool_calls => content_parts.push(part),
+				_ => {}
+			}
+		}
+
+		let streamed_text = self.captured_data.content.take();
+		if self.options.capture_content
+			&& !content_parts.iter().any(ContentPart::is_text)
+			&& let Some(text) = streamed_text
+			&& !text.is_empty()
+		{
+			content_parts.push(ContentPart::Text(text));
+		}
+
+		let streamed_reasoning = self.captured_data.reasoning_content.take();
+		let reasoning_content = if self.options.capture_reasoning_content {
+			streamed_reasoning.or(parsed_output.reasoning_content)
+		} else {
+			None
+		};
+
+		let thought_signatures =
+			if self.options.capture_reasoning_content && !parsed_output.thought_signatures.is_empty() {
+				Some(parsed_output.thought_signatures)
+			} else {
+				None
+			};
+
+		Ok(FinalOutputCapture {
+			content_parts: (!content_parts.is_empty()).then_some(content_parts),
+			reasoning_content,
+			thought_signatures,
+		})
+	}
+}
+
+struct FinalOutputCapture {
+	content_parts: Option<Vec<ContentPart>>,
+	reasoning_content: Option<String>,
+	thought_signatures: Option<Vec<String>>,
 }
 
 impl futures::Stream for OpenAIRespStreamer {
@@ -140,12 +237,57 @@ impl futures::Stream for OpenAIRespStreamer {
 							continue;
 						}
 
+						RespStreamEvent::OutputItemDone { output_index, item } => {
+							if item.x_get_str("type").ok() == Some("function_call")
+								&& let Ok(parts) = ContentPart::from_resp_output_item(item.clone())
+								&& let Some(tool_call) = parts.into_iter().find_map(ContentPart::into_tool_call)
+							{
+								let should_emit = self
+									.in_progress_tool_calls
+									.get(&output_index)
+									.and_then(|tc| tc.fn_arguments.as_str())
+									.is_none_or(str::is_empty);
+								self.in_progress_tool_calls.insert(output_index, tool_call.clone());
+								self.completed_output_items.insert(output_index, item);
+								if should_emit {
+									return Poll::Ready(Some(Ok(InterStreamEvent::ToolCallChunk(tool_call))));
+								}
+								continue;
+							}
+
+							self.completed_output_items.insert(output_index, item);
+							continue;
+						}
+
 						RespStreamEvent::ContentPartAdded { .. } => {
 							// We can ignore this as deltas will follow
 							continue;
 						}
 
-						RespStreamEvent::OutputTextDelta { delta, .. } => {
+						RespStreamEvent::OutputTextDone {
+							output_index,
+							content_index,
+							text,
+						} => {
+							if text.is_empty() || self.streamed_text_parts.contains(&(output_index, content_index)) {
+								continue;
+							}
+							self.streamed_text_parts.insert((output_index, content_index));
+							if self.options.capture_content {
+								match self.captured_data.content {
+									Some(ref mut c) => c.push_str(&text),
+									None => self.captured_data.content = Some(text.clone()),
+								}
+							}
+							return Poll::Ready(Some(Ok(InterStreamEvent::Chunk(text))));
+						}
+
+						RespStreamEvent::OutputTextDelta {
+							output_index,
+							content_index,
+							delta,
+						} => {
+							self.streamed_text_parts.insert((output_index, content_index));
 							if self.options.capture_content {
 								match self.captured_data.content {
 									Some(ref mut c) => c.push_str(&delta),
@@ -185,45 +327,16 @@ impl futures::Stream for OpenAIRespStreamer {
 							if self.options.capture_usage {
 								self.captured_data.usage = response.usage.map(Into::into);
 							}
-
-							let mut tool_calls = Vec::new();
-							for (_, mut tc) in std::mem::take(&mut self.in_progress_tool_calls) {
-								// Parse arguments if they are strings
-								if let Some(args_str) = tc.fn_arguments.as_str()
-									&& let Ok(args_val) = serde_json::from_str(args_str)
-								{
-									tc.fn_arguments = args_val;
-								}
-								tool_calls.push(tc);
-							}
-
-							if self.options.capture_tool_calls && !tool_calls.is_empty() {
-								self.captured_data.tool_calls = Some(tool_calls.clone());
-							}
-
-							// Extract encrypted reasoning content from output items
-							// (OpenAI equivalent of Gemini thought signatures).
-							if self.options.capture_reasoning_content {
-								let mut thought_sigs: Vec<String> = Vec::new();
-								for item in &response.output {
-									if item.x_get_str("type").ok() == Some("reasoning")
-										&& let Ok(encrypted) = item.x_get_str("encrypted_content")
-									{
-										thought_sigs.push(encrypted.to_string());
-									}
-								}
-								if !thought_sigs.is_empty() {
-									self.captured_data.thought_signatures = Some(thought_sigs);
-								}
-							}
+							let final_output = self.finalize_output_capture(Some(response.output))?;
 
 							let inter_stream_end = InterStreamEnd {
 								captured_usage: self.captured_data.usage.take(),
 								captured_stop_reason: self.captured_data.stop_reason.take().map(StopReason::from),
-								captured_text_content: self.captured_data.content.take(),
-								captured_reasoning_content: self.captured_data.reasoning_content.take(),
-								captured_tool_calls: self.captured_data.tool_calls.take(),
-								captured_thought_signatures: self.captured_data.thought_signatures.take(),
+								captured_text_content: None,
+								captured_content_parts: final_output.content_parts,
+								captured_reasoning_content: final_output.reasoning_content,
+								captured_tool_calls: None,
+								captured_thought_signatures: final_output.thought_signatures,
 								captured_response_id: Some(response.id),
 							};
 
@@ -247,16 +360,16 @@ impl futures::Stream for OpenAIRespStreamer {
 						RespStreamEvent::ResponseIncomplete { response } => {
 							self.done = true;
 							self.captured_data.stop_reason = Some(response.status.clone());
-							// For incomplete, we might still want to return what we have?
-							// But for now, let's treat it as a successful end but with whatever we captured.
 							let resp_id = response.id.clone();
+							let final_output = self.finalize_output_capture(Some(response.output))?;
 							let inter_stream_end = InterStreamEnd {
 								captured_usage: response.usage.map(Into::into),
 								captured_stop_reason: self.captured_data.stop_reason.take().map(StopReason::from),
-								captured_text_content: self.captured_data.content.take(),
-								captured_reasoning_content: self.captured_data.reasoning_content.take(),
-								captured_tool_calls: self.captured_data.tool_calls.take(),
-								captured_thought_signatures: None,
+								captured_text_content: None,
+								captured_content_parts: final_output.content_parts,
+								captured_reasoning_content: final_output.reasoning_content,
+								captured_tool_calls: None,
+								captured_thought_signatures: final_output.thought_signatures,
 								captured_response_id: Some(resp_id),
 							};
 
@@ -279,13 +392,18 @@ impl futures::Stream for OpenAIRespStreamer {
 				None => {
 					if !self.done {
 						self.done = true;
+						let final_output = match self.finalize_output_capture(None) {
+							Ok(final_output) => final_output,
+							Err(err) => return Poll::Ready(Some(Err(err))),
+						};
 						let inter_stream_end = InterStreamEnd {
 							captured_usage: self.captured_data.usage.take(),
 							captured_stop_reason: self.captured_data.stop_reason.take().map(StopReason::from),
-							captured_text_content: self.captured_data.content.take(),
-							captured_reasoning_content: self.captured_data.reasoning_content.take(),
-							captured_tool_calls: self.captured_data.tool_calls.take(),
-							captured_thought_signatures: None,
+							captured_text_content: None,
+							captured_content_parts: final_output.content_parts,
+							captured_reasoning_content: final_output.reasoning_content,
+							captured_tool_calls: None,
+							captured_thought_signatures: final_output.thought_signatures,
 							captured_response_id: None,
 						};
 						return Poll::Ready(Some(Ok(InterStreamEvent::End(inter_stream_end))));

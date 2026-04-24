@@ -367,6 +367,7 @@ fn process_buff_string_delimited(
 	} else {
 		buff_string
 	};
+	let full_string = full_string.replace("\r\n", "\n");
 
 	let mut parts: Vec<String> = full_string.split(delimiter).map(|s| s.to_string()).collect();
 
@@ -436,6 +437,23 @@ mod tests {
 		)
 		.expect("process c2");
 		assert_eq!(msg2.as_deref(), Some("data: hello"));
+	}
+
+	#[test]
+	fn sse_event_with_crlf_delimiters_should_parse() {
+		let mut partial_message = None;
+		let mut remaining_messages = None;
+		let msg = process_decoded_text(
+			&StreamMode::Delimiter("\n\n"),
+			"event: ping\r\ndata: hello\r\n\r\n".to_string(),
+			&mut partial_message,
+			&mut remaining_messages,
+		)
+		.expect("process crlf sse");
+
+		assert_eq!(msg.as_deref(), Some("event: ping\ndata: hello"));
+		assert!(partial_message.is_none());
+		assert!(remaining_messages.is_none());
 	}
 
 	#[test]

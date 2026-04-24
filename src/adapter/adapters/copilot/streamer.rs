@@ -61,6 +61,7 @@ impl Stream for CopilotStreamer {
 								.take()
 								.map(crate::chat::StopReason::from),
 							captured_text_content: self.captured_data.content.take(),
+							captured_content_parts: None,
 							captured_reasoning_content: self.captured_data.reasoning_content.take(),
 							captured_tool_calls: self.captured_data.tool_calls.take(),
 							captured_thought_signatures: None,
@@ -159,6 +160,7 @@ impl Stream for CopilotStreamer {
 									.take()
 									.map(crate::chat::StopReason::from),
 								captured_text_content: self.captured_data.content.take(),
+								captured_content_parts: None,
 								captured_reasoning_content: self.captured_data.reasoning_content.take(),
 								captured_tool_calls: self.captured_data.tool_calls.take(),
 								captured_thought_signatures: None,

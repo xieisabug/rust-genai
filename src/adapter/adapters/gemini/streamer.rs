@@ -63,6 +63,7 @@ impl futures::Stream for GeminiStreamer {
 								captured_usage: self.captured_data.usage.take(),
 								captured_stop_reason: self.captured_data.stop_reason.take().map(StopReason::from),
 								captured_text_content: self.captured_data.content.take(),
+								captured_content_parts: None,
 								captured_reasoning_content: self.captured_data.reasoning_content.take(),
 								captured_tool_calls: self.captured_data.tool_calls.take(),
 								captured_thought_signatures: self.captured_data.thought_signatures.take(),
