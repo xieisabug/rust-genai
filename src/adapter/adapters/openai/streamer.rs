@@ -198,6 +198,13 @@ impl futures::Stream for OpenAIStreamer {
 
 					let adapter_kind = self.options.model_iden.adapter_kind;
 
+					// OpenAI-compatible gateways can attach usage to content, finish, or a
+					// standalone final frame. A null placeholder must not hide later totals.
+					if adapter_kind == AdapterKind::OpenAI && self.options.capture_usage
+						&& let Some(raw) = message_data.get("usage").filter(|v| v.is_object()) {
+						self.captured_data.usage = Some(OpenAIAdapter::into_usage(adapter_kind, raw.clone()));
+					}
+
 					// If we have a first choice, then it's a normal message
 					if let Some(mut first_choice) = first_choice {
 						// -- Finish Reason
@@ -237,7 +244,7 @@ impl futures::Stream for OpenAIStreamer {
 								}
 							}
 
-							if let Some(usage) =
+							if adapter_kind != AdapterKind::OpenAI && let Some(usage) =
 								take_finish_reason_usage(&mut message_data, adapter_kind, self.options.capture_usage)
 							{
 								self.captured_data.usage = Some(usage);
@@ -360,7 +367,7 @@ impl futures::Stream for OpenAIStreamer {
 					// -- Usage message
 					else {
 						// If it's not Groq, xAI, DeepSeek the usage is captured at the end when choices are empty or null
-						if !matches!(adapter_kind, AdapterKind::Groq)
+						if !matches!(adapter_kind, AdapterKind::Groq | AdapterKind::OpenAI)
 							&& !matches!(adapter_kind, AdapterKind::DeepSeek)
 							&& self.captured_data.usage.is_none() // this might be redundant
 							&& self.options.capture_usage

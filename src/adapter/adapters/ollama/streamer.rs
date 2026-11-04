@@ -149,6 +149,7 @@ impl futures::Stream for OllamaStreamer {
 								};
 
 								self.captured_data.usage = Some(Usage {
+									billing: Default::default(),
 									prompt_tokens,
 									completion_tokens,
 									total_tokens,

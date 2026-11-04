@@ -15,6 +15,8 @@ use serde_with::{serde_as, skip_serializing_none};
 #[skip_serializing_none]
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct RespUsage {
+	#[serde(flatten)]
+	pub billing: crate::chat::UsageBilling,
 	/// Total input tokens (formerly `input_tokens`).
 	pub input_tokens: Option<i32>,
 	pub input_tokens_details: Option<InputTokensDetails>,
@@ -114,6 +116,7 @@ impl From<OutputTokensDetails> for CompletionTokensDetails {
 impl From<RespUsage> for Usage {
 	fn from(value: RespUsage) -> Self {
 		Usage {
+			billing: value.billing,
 			prompt_tokens: value.input_tokens,
 			prompt_tokens_details: value.input_tokens_details.map(Into::into),
 			completion_tokens: value.output_tokens,

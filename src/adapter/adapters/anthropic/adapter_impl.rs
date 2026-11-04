@@ -664,6 +664,7 @@ impl AnthropicAdapter {
 			};
 
 		Usage {
+			billing: crate::chat::UsageBilling::from_usage(&usage_value),
 			prompt_tokens: Some(prompt_tokens),
 			prompt_tokens_details,
 

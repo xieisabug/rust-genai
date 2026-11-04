@@ -88,6 +88,7 @@ impl futures::Stream for GeminiStreamer {
 							};
 
 							// -- Extract the Gemini Response
+							let has_usage = json_block.get("usageMetadata").is_some_and(Value::is_object);
 							let gemini_response =
 								match GeminiAdapter::body_to_gemini_chat_response(&self.options.model_iden, json_block)
 								{
@@ -104,6 +105,9 @@ impl futures::Stream for GeminiStreamer {
 								stop_reason,
 							} = gemini_response;
 
+							if self.options.capture_usage && has_usage {
+								self.captured_data.usage = Some(usage);
+							}
 							// -- Capture stop_reason if present (typically in the last chunk)
 							if stop_reason.is_some() {
 								self.captured_data.stop_reason = stop_reason;
@@ -143,9 +147,6 @@ impl futures::Stream for GeminiStreamer {
 									None => self.captured_data.thought_signatures = Some(vec![thought.clone()]),
 								}
 
-								if self.options.capture_usage {
-									self.captured_data.usage = Some(usage.clone());
-								}
 
 								self.pending_events.push_back(InterStreamEvent::ThoughtSignatureChunk(thought));
 							}
@@ -156,9 +157,6 @@ impl futures::Stream for GeminiStreamer {
 										Some(ref mut rc) => rc.push_str(&reasoning_content),
 										None => self.captured_data.reasoning_content = Some(reasoning_content.clone()),
 									}
-								}
-								if self.options.capture_usage {
-									self.captured_data.usage = Some(usage.clone());
 								}
 								self.pending_events
 									.push_back(InterStreamEvent::ReasoningChunk(reasoning_content));
@@ -174,9 +172,6 @@ impl futures::Stream for GeminiStreamer {
 									}
 								}
 
-								if self.options.capture_usage {
-									self.captured_data.usage = Some(usage.clone());
-								}
 
 								self.pending_events.push_back(InterStreamEvent::Chunk(stream_text_content));
 							}
@@ -188,9 +183,6 @@ impl futures::Stream for GeminiStreamer {
 										Some(ref mut tool_calls) => tool_calls.push(tool_call.clone()),
 										None => self.captured_data.tool_calls = Some(vec![tool_call.clone()]),
 									}
-								}
-								if self.options.capture_usage {
-									self.captured_data.usage = Some(usage.clone());
 								}
 								self.pending_events.push_back(InterStreamEvent::ToolCallChunk(tool_call));
 							}

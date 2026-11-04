@@ -49,6 +49,7 @@ impl OllamaAdapter {
 		};
 
 		Usage {
+			billing: Default::default(),
 			prompt_tokens,
 			completion_tokens,
 			total_tokens,

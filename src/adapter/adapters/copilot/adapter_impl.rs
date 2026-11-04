@@ -413,6 +413,7 @@ impl Adapter for CopilotAdapter {
 
 		// Extract usage
 		let usage = copilot_response.usage.map(|u| Usage {
+			billing: Default::default(),
 			prompt_tokens: Some(u.prompt_tokens as i32),
 			completion_tokens: Some(u.completion_tokens as i32),
 			total_tokens: Some(u.total_tokens as i32),

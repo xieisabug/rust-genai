@@ -630,6 +630,7 @@ impl GeminiAdapter {
 		};
 
 		Usage {
+			billing: crate::chat::UsageBilling::from_usage(&usage_value),
 			prompt_tokens,
 			// for now, None for Gemini
 			prompt_tokens_details,

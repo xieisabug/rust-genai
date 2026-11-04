@@ -212,6 +212,7 @@ pub fn to_embed_response(
 
 	// Create usage information
 	let usage = Usage {
+		billing: Default::default(),
 		prompt_tokens: cohere_res
 			.meta
 			.as_ref()

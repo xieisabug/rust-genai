@@ -14,6 +14,9 @@ use serde_with::{serde_as, skip_serializing_none};
 #[skip_serializing_none]
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
 pub struct Usage {
+	/// Gateway billing extensions, when included alongside the normal token counts.
+	#[serde(flatten)]
+	pub billing: UsageBilling,
 	/// Total input tokens (formerly `input_tokens`).
 	pub prompt_tokens: Option<i32>,
 	pub prompt_tokens_details: Option<PromptTokensDetails>,
@@ -25,6 +28,22 @@ pub struct Usage {
 	/// Total tokens as reported by the API, or computed as prompt + completion
 	/// (including cache read/creation tokens when applicable).
 	pub total_tokens: Option<i32>,
+}
+
+#[skip_serializing_none]
+#[derive(Default, Debug, Clone, Serialize, Deserialize)]
+pub struct UsageBilling {
+	pub cost: Option<serde_json::Value>,
+	pub opencode: Option<serde_json::Value>,
+}
+
+impl UsageBilling {
+	pub(crate) fn from_usage(value: &serde_json::Value) -> Self {
+		Self {
+			cost: value.get("cost").filter(|v| v.is_number()).cloned(),
+			opencode: value.get("opencode").filter(|v| v.is_object()).cloned(),
+		}
+	}
 }
 
 impl Usage {
@@ -109,5 +128,21 @@ impl CompletionTokensDetails {
 			&& self.rejected_prediction_tokens.is_none()
 			&& self.reasoning_tokens.is_none()
 			&& self.audio_tokens.is_none()
+	}
+}
+
+#[cfg(test)]
+mod billing_tests {
+	use super::*;
+
+	#[test]
+	fn preserves_gateway_allowance_and_zero_balance_cost() {
+		let usage: Usage = serde_json::from_value(serde_json::json!({
+			"prompt_tokens":39, "completion_tokens":16, "total_tokens":55,
+			"cost":0, "opencode":{"billing_source":"go","allowance":0.00000927}
+		})).unwrap();
+		assert_eq!(usage.total_tokens, Some(55));
+		assert_eq!(usage.billing.cost, Some(serde_json::json!(0)));
+		assert_eq!(usage.billing.opencode.unwrap()["allowance"], 0.00000927);
 	}
 }

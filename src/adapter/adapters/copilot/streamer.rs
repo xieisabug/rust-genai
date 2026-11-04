@@ -85,6 +85,7 @@ impl Stream for CopilotStreamer {
 					if self.options.capture_usage {
 						if let Some(copilot_usage) = stream_response.usage {
 							self.captured_data.usage = Some(Usage {
+								billing: Default::default(),
 								prompt_tokens: Some(copilot_usage.prompt_tokens as i32),
 								completion_tokens: Some(copilot_usage.completion_tokens as i32),
 								total_tokens: Some(copilot_usage.total_tokens as i32),

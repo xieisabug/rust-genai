@@ -334,6 +334,7 @@ impl CohereAdapter {
 
 		#[allow(deprecated)]
 		Usage {
+			billing: Default::default(),
 			prompt_tokens,
 			// for now, None for Cohere
 			prompt_tokens_details: None,

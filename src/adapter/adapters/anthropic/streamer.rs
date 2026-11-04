@@ -279,6 +279,13 @@ impl AnthropicStreamer {
 				return Ok(()); // For now permissive
 			};
 
+			if let Some(raw) = data.pointer(if message_type == "message_start" { "/message/usage" } else { "/usage" }) {
+				let billing = crate::chat::UsageBilling::from_usage(raw);
+				if billing.cost.is_some() || billing.opencode.is_some() {
+					self.captured_data.usage.get_or_insert_with(Usage::default).billing = billing;
+				}
+			}
+
 			// -- Capture/Add the eventual input_tokens
 			// NOTE: Permissive on this one; if an error occurs, treat it as nonexistent (for now)
 			if let Ok(input_tokens) = data.x_get::<i32>(input_path) {
