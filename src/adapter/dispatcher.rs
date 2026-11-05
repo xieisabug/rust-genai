@@ -33,6 +33,15 @@ impl AdapterDispatcher {
 		dispatch_adapter!(kind, A::all_model_names(kind, endpoint, auth, web_client).await)
 	}
 
+	pub async fn all_models(
+		kind: AdapterKind,
+		endpoint: Endpoint,
+		auth: AuthData,
+		web_client: &WebClient,
+	) -> Result<Vec<crate::Model>> {
+		dispatch_adapter!(kind, A::all_models(kind, endpoint, auth, web_client).await)
+	}
+
 	pub fn get_service_url(model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
 		dispatch_adapter!(model.adapter_kind, A::get_service_url(model, service_type, endpoint))
 	}

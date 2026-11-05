@@ -3,7 +3,7 @@ use crate::chat::{ChatOptions, ChatOptionsSet, ChatRequest, ChatResponse, ChatSt
 use crate::client::ModelSpec;
 use crate::embed::{EmbedOptions, EmbedOptionsSet, EmbedRequest, EmbedResponse};
 use crate::resolver::{AuthData, ProviderConfig};
-use crate::{Client, Error, ModelIden, Result, ServiceTarget};
+use crate::{Client, Error, Model, ModelIden, Result, ServiceTarget};
 
 /// High-level client APIs.
 impl Client {
@@ -28,6 +28,35 @@ impl Client {
 		adapter_kind: AdapterKind,
 		provider_config: impl Into<ProviderConfig>,
 	) -> Result<Vec<String>> {
+		let (auth, endpoint) = self.resolve_provider_config(adapter_kind, provider_config).await?;
+
+		let models = AdapterDispatcher::all_model_names(adapter_kind, endpoint, auth, self.web_client()).await?;
+		Ok(models)
+	}
+
+	/// Lists the [`Model`] descriptions (capabilities, token limits, modalities)
+	/// for the given adapter.
+	///
+	/// Accepts [`ProviderConfig`] or compatible values to override endpoint and auth,
+	/// exactly like [`Client::all_model_names`].
+	pub async fn all_models(
+		&self,
+		adapter_kind: AdapterKind,
+		provider_config: impl Into<ProviderConfig>,
+	) -> Result<Vec<Model>> {
+		let (auth, endpoint) = self.resolve_provider_config(adapter_kind, provider_config).await?;
+
+		let models = AdapterDispatcher::all_models(adapter_kind, endpoint, auth, self.web_client()).await?;
+		Ok(models)
+	}
+
+	/// Resolves the endpoint/auth pair for a provider-facing listing call, falling
+	/// back to the client config defaults for whichever value was not supplied.
+	async fn resolve_provider_config(
+		&self,
+		adapter_kind: AdapterKind,
+		provider_config: impl Into<ProviderConfig>,
+	) -> Result<(AuthData, crate::resolver::Endpoint)> {
 		let ProviderConfig { endpoint, auth } = provider_config.into();
 
 		let (auth, endpoint) = match (auth, endpoint) {
@@ -38,8 +67,7 @@ impl Client {
 			}
 		};
 
-		let models = AdapterDispatcher::all_model_names(adapter_kind, endpoint, auth, self.web_client()).await?;
-		Ok(models)
+		Ok((auth, endpoint))
 	}
 
 	/// Returns the bound [`AdapterKind`] for this Client, if any.

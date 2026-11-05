@@ -4,7 +4,7 @@ use crate::embed::{EmbedOptionsSet, EmbedRequest, EmbedResponse};
 use crate::resolver::{AuthData, Endpoint};
 use crate::webc::StreamRequest as RequestBuilder;
 use crate::webc::{WebClient, WebResponse};
-use crate::{Headers, ModelIden};
+use crate::{Headers, Model, ModelIden};
 use crate::{Result, ServiceTarget};
 use serde_json::Value;
 
@@ -22,6 +22,25 @@ pub trait Adapter {
 		auth: AuthData,
 		web_client: &WebClient,
 	) -> Result<Vec<String>>;
+
+	/// Returns the richer [`Model`] descriptions for this adapter kind.
+	///
+	/// The default implementation derives them from [`Adapter::all_model_names`]
+	/// combined with [`crate::adapter::ModelCapabilities`], which is correct for
+	/// any adapter that can enumerate its model names. Adapters exposing richer
+	/// provider metadata (e.g. a models endpoint) can override this.
+	async fn all_models(
+		kind: AdapterKind,
+		endpoint: Endpoint,
+		auth: AuthData,
+		web_client: &WebClient,
+	) -> Result<Vec<Model>> {
+		let names = Self::all_model_names(kind, endpoint, auth, web_client).await?;
+		Ok(names
+			.into_iter()
+			.map(|name| Model::from_capabilities(kind, name))
+			.collect())
+	}
 
 	/// The base service URL for this AdapterKind for the given service type.
 	/// NOTE: For some services, the URL will be further updated in the to_web_request_data method.

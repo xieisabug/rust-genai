@@ -15,12 +15,14 @@ mod adapter_kind;
 mod adapter_types;
 mod adapters;
 mod dispatcher;
+mod model_capabilities;
 
 // -- Flatten (private, crate, public)
 // use adapters::*;
 
 pub(crate) use adapter_types::*;
 pub(crate) use dispatcher::*;
+pub(crate) use model_capabilities::*;
 
 pub use adapter_kind::*;
 
