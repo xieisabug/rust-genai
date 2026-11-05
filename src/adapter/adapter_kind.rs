@@ -99,6 +99,14 @@ pub enum AdapterKind {
 	/// Uses namespace routing: `github_copilot::openai/gpt-4.1-mini`, `github_copilot::anthropic/claude-sonnet-4-6`, `github_copilot::google/gemini-2.5-pro`
 	GithubCopilot,
 
+	/// GitHub Copilot Chat (uses its own protocol with OAuth authentication).
+	/// Namespace: `copilot::model-name` — the Copilot `api.githubcopilot.com` chat endpoint.
+	Copilot,
+
+	/// GitHub Copilot explicit routing alias for the Copilot `/responses` transport.
+	/// Namespace: `copilot_resp::model-name`.
+	CopilotResp,
+
 	/// OpenCode Go proxy (OpenAI-compatible adapter for the OpenCode ecosystem).
 	/// Namespace: `opencode_go::model-name` — route any model via the OpenCode Go gateway.
 	OpenCodeGo,
@@ -199,6 +207,8 @@ adapter_kind_str_maps! {
 	Omlx               => "Omlx",               "omlx",                adapters::all_adapters::OmlxAdapter;
 	Vertex             => "Vertex",             "vertex",              adapters::all_adapters::VertexAdapter;
 	GithubCopilot      => "GithubCopilot",      "github_copilot",      adapters::all_adapters::GithubCopilotAdapter;
+	Copilot            => "Copilot",            "copilot",             adapters::all_adapters::CopilotAdapter;
+	CopilotResp        => "CopilotResp",        "copilot_resp",        adapters::all_adapters::CopilotRespAdapter;
 	OpenCodeGo         => "OpenCodeGo",         "opencode_go",         adapters::all_adapters::OpenCodeGoAdapter;
 	BedrockApi         => "BedrockApi",         "bedrock_api",         adapters::all_adapters::BedrockApiAdapter;
 	OpenRouter         => "OpenRouter",         "open_router",         adapters::all_adapters::OpenRouterAdapter;

@@ -37,6 +37,10 @@ pub use super::baidu::BaiduAdapter;
 pub use super::github_copilot::GithubCopilotAdapter;
 pub use super::opencode_go::OpenCodeGoAdapter;
 
+// -- GitHub Copilot chat endpoint (api.githubcopilot.com) and its /responses transport
+pub use super::copilot::CopilotAdapter;
+pub use super::copilot_resp::CopilotRespAdapter;
+
 // -- Has namespace based endpoint routing
 pub use super::zai::ZaiAdapter;
 

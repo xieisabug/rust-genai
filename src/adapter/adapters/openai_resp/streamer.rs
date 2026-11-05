@@ -231,11 +231,7 @@ impl OpenAIRespStreamer {
 		let mut parts = Vec::new();
 		for item in items.into_values() {
 			if let Ok(item_parts) = ContentPart::from_resp_output_item(item) {
-				parts.extend(
-					item_parts
-						.into_iter()
-						.filter(|part| matches!(part, ContentPart::Binary(_))),
-				);
+				parts.extend(item_parts.into_iter().filter(|part| matches!(part, ContentPart::Binary(_))));
 			}
 		}
 

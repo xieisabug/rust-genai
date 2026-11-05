@@ -36,10 +36,7 @@ pub trait Adapter {
 		web_client: &WebClient,
 	) -> Result<Vec<Model>> {
 		let names = Self::all_model_names(kind, endpoint, auth, web_client).await?;
-		Ok(names
-			.into_iter()
-			.map(|name| Model::from_capabilities(kind, name))
-			.collect())
+		Ok(names.into_iter().map(|name| Model::from_capabilities(kind, name)).collect())
 	}
 
 	/// The base service URL for this AdapterKind for the given service type.
