@@ -39,6 +39,10 @@ pub struct InterStreamEnd {
 	// When `ChatOptions..capture_tool_calls == true`
 	pub captured_tool_calls: Option<Vec<crate::chat::ToolCall>>,
 
+	/// When the provider returns final structured content (e.g. generated images/binary)
+	/// at stream end. Adapters merge these into [`crate::chat::StreamEnd::captured_content`].
+	pub captured_content_parts: Option<Vec<crate::chat::ContentPart>>,
+
 	// Provider continuation metadata captured whenever the provider emits it.
 	pub captured_thought_signatures: Option<Vec<String>>,
 

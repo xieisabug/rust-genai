@@ -55,6 +55,8 @@ pub struct StreamerCapturedData {
 	pub reasoning_content: Option<String>,
 	pub tool_calls: Option<Vec<crate::chat::ToolCall>>,
 	pub thought_signatures: Option<Vec<String>>,
+	/// Non-text structured content (e.g. generated images) captured at stream end.
+	pub content_parts: Option<Vec<crate::chat::ContentPart>>,
 }
 
 // endregion: --- Streamer Captured Data

@@ -280,6 +280,16 @@ impl From<InterStreamEnd> for StreamEnd {
 				captured_content = Some(MessageContent::from_tool_calls(captured_tool_calls));
 			}
 		}
+		if let Some(captured_content_parts) = inter_end.captured_content_parts
+			&& !captured_content_parts.is_empty()
+		{
+			// Non-text structured output (e.g. generated images) materialised at stream end.
+			if let Some(existing_content) = &mut captured_content {
+				existing_content.extend(MessageContent::from_parts(captured_content_parts));
+			} else {
+				captured_content = Some(MessageContent::from_parts(captured_content_parts));
+			}
+		}
 
 		// -- Return result
 		StreamEnd {
@@ -330,6 +340,18 @@ impl StreamEnd {
 	pub fn captured_into_tool_calls(self) -> Option<Vec<ToolCall>> {
 		let captured_content = self.captured_content?;
 		Some(captured_content.into_tool_calls())
+	}
+
+	/// Returns all captured binaries (e.g. generated images), if any.
+	pub fn captured_binaries(&self) -> Option<Vec<&crate::chat::Binary>> {
+		let captured_content = self.captured_content.as_ref()?;
+		Some(captured_content.binaries())
+	}
+
+	/// Consumes `self` and returns all captured binaries (e.g. generated images), if any.
+	pub fn captured_into_binaries(self) -> Option<Vec<crate::chat::Binary>> {
+		let captured_content = self.captured_content?;
+		Some(captured_content.into_binaries())
 	}
 
 	/// Returns all captured thought signatures, if any.

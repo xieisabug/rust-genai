@@ -352,6 +352,7 @@ impl futures::Stream for AnthropicStreamer {
 								captured_thought_signatures: None,
 								captured_thought_blocks: (!self.captured_thought_blocks.is_empty())
 									.then(|| std::mem::take(&mut self.captured_thought_blocks)),
+								captured_content_parts: None,
 								captured_response_id: None,
 							};
 

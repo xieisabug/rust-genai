@@ -347,6 +347,7 @@ impl futures::Stream for OpenAIStreamer {
 							captured_tool_calls,
 							captured_thought_signatures: None,
 							captured_thought_blocks,
+							captured_content_parts: None,
 							captured_response_id: None,
 						};
 

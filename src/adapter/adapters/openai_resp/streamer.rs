@@ -1,11 +1,11 @@
 use super::RespResponse;
 use crate::adapter::adapters::support::{StreamerCapturedData, StreamerOptions, new_frame_tap};
 use crate::adapter::inter_stream::{InterStreamEnd, InterStreamEvent};
-use crate::chat::{ChatOptionsSet, StopReason, ToolCall};
+use crate::chat::{ChatOptionsSet, ContentPart, StopReason, ToolCall};
 use crate::webc::{Event, EventSourceStream};
 use crate::{Error, ModelIden, Result};
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -22,6 +22,9 @@ pub struct OpenAIRespStreamer {
 
 	in_progress_tool_calls: BTreeMap<usize, ToolCall>,
 	custom_tool_call_indexes: BTreeSet<usize>,
+	/// Latest partial (or final) image per `output_index`, materialised as an
+	/// `image_generation_call` output item if the terminal response omits it.
+	partial_image_items: BTreeMap<usize, Value>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -104,6 +107,20 @@ enum RespStreamEvent {
 		delta: String,
 	},
 
+	/// Emitted by the image generation tool while the image is still being produced.
+	/// OpenAI sends several of these (progressively larger images) and finally the
+	/// `image_generation_call` item in `response.output`.
+	#[serde(rename = "response.image_generation_call.partial_image")]
+	ImageGenerationCallPartialImage {
+		#[serde(default)]
+		output_index: usize,
+		#[serde(default)]
+		item_id: String,
+		#[serde(default)]
+		output_format: Option<String>,
+		partial_image_b64: String,
+	},
+
 	#[serde(rename = "response.completed")]
 	ResponseCompleted { response: RespResponse },
 
@@ -131,6 +148,7 @@ impl OpenAIRespStreamer {
 			captured_data: Default::default(),
 			in_progress_tool_calls: BTreeMap::new(),
 			custom_tool_call_indexes: BTreeSet::new(),
+			partial_image_items: BTreeMap::new(),
 		}
 	}
 
@@ -188,6 +206,41 @@ impl OpenAIRespStreamer {
 
 		if self.options.capture_tool_calls && !tool_calls.is_empty() {
 			self.captured_data.tool_calls = Some(tool_calls);
+		}
+	}
+
+	/// Collects non-text structured output (e.g. generated images) from the terminal
+	/// response's `output`.
+	///
+	/// Started from the `response.image_generation_call.partial_image` events already
+	/// received, so a terminal payload that omits the final `image_generation_call`
+	/// item still yields the best bytes the provider gave us.
+	fn capture_content_parts(&mut self, output: &[Value]) {
+		if !self.options.capture_content {
+			return;
+		}
+
+		let mut items: BTreeMap<usize, Value> = std::mem::take(&mut self.partial_image_items);
+		for (index, item) in output.iter().enumerate() {
+			if item.x_get_str("type").ok() == Some("image_generation_call") {
+				// A final item supersedes the partial image for the same slot.
+				items.insert(index, item.clone());
+			}
+		}
+
+		let mut parts = Vec::new();
+		for item in items.into_values() {
+			if let Ok(item_parts) = ContentPart::from_resp_output_item(item) {
+				parts.extend(
+					item_parts
+						.into_iter()
+						.filter(|part| matches!(part, ContentPart::Binary(_))),
+				);
+			}
+		}
+
+		if !parts.is_empty() {
+			self.captured_data.content_parts = Some(parts);
 		}
 	}
 }
@@ -329,6 +382,32 @@ impl futures::Stream for OpenAIRespStreamer {
 							continue;
 						}
 
+						RespStreamEvent::ImageGenerationCallPartialImage {
+							output_index,
+							item_id,
+							output_format,
+							partial_image_b64,
+						} => {
+							if partial_image_b64.is_empty() {
+								continue;
+							}
+
+							// Keep the newest partial image for this output slot. If the terminal
+							// response never carries the final `image_generation_call` item, this is
+							// what the caller gets to see.
+							self.partial_image_items.insert(
+								output_index,
+								json!({
+									"id": item_id,
+									"type": "image_generation_call",
+									"status": "partial",
+									"output_format": output_format,
+									"result": partial_image_b64,
+								}),
+							);
+							continue;
+						}
+
 						RespStreamEvent::ResponseCompleted { response } => {
 							self.done = true;
 							self.captured_data.stop_reason = Some(response.stop_reason_raw());
@@ -338,6 +417,7 @@ impl futures::Stream for OpenAIRespStreamer {
 							}
 
 							self.capture_tool_calls(&response.output);
+							self.capture_content_parts(&response.output);
 
 							// Extract encrypted reasoning content from output items
 							// (OpenAI equivalent of Gemini thought signatures).
@@ -366,6 +446,7 @@ impl futures::Stream for OpenAIRespStreamer {
 								captured_text_content: self.captured_data.content.take(),
 								captured_reasoning_content: self.captured_data.reasoning_content.take(),
 								captured_tool_calls: self.captured_data.tool_calls.take(),
+								captured_content_parts: self.captured_data.content_parts.take(),
 								captured_thought_signatures: self.captured_data.thought_signatures.take(),
 								captured_thought_blocks: None,
 								captured_response_id: Some(response.id),
@@ -395,6 +476,7 @@ impl futures::Stream for OpenAIRespStreamer {
 							// calls it streamed, a truncated call with its arguments as far as
 							// they got (left as a string when they do not parse).
 							self.capture_tool_calls(&response.output);
+							self.capture_content_parts(&response.output);
 							let resp_id = response.id.clone();
 							let inter_stream_end = InterStreamEnd {
 								captured_usage: response.usage.map(Into::into),
@@ -402,6 +484,7 @@ impl futures::Stream for OpenAIRespStreamer {
 								captured_text_content: self.captured_data.content.take(),
 								captured_reasoning_content: self.captured_data.reasoning_content.take(),
 								captured_tool_calls: self.captured_data.tool_calls.take(),
+								captured_content_parts: self.captured_data.content_parts.take(),
 								captured_thought_signatures: None,
 								captured_thought_blocks: None,
 								captured_response_id: Some(resp_id),
@@ -447,6 +530,9 @@ impl futures::Stream for OpenAIRespStreamer {
 							captured_text_content: self.captured_data.content.take(),
 							captured_reasoning_content: self.captured_data.reasoning_content.take(),
 							captured_tool_calls: self.captured_data.tool_calls.take(),
+							// The provider closed the stream without a terminal event; still hand
+							// back any partial image bytes seen so far rather than dropping them.
+							captured_content_parts: self.captured_data.content_parts.take(),
 							captured_thought_signatures: None,
 							captured_thought_blocks: None,
 							captured_response_id: None,

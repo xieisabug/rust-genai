@@ -122,6 +122,7 @@ impl GeminiIxStreamer {
 			captured_tool_calls: self.captured_data.tool_calls.take(),
 			captured_thought_signatures: self.captured_data.thought_signatures.take(),
 			captured_thought_blocks: None,
+			captured_content_parts: None,
 			captured_response_id: response_id.or_else(|| self.interaction_id.clone()),
 		}
 	}
