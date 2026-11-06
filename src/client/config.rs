@@ -174,14 +174,20 @@ impl ClientConfig {
 	/// a private endpoint must not fall back to the adapter's public default
 	/// here, or it would send that Client's credentials to the wrong host.
 	pub(crate) async fn resolve_adapter_config(&self, adapter_kind: AdapterKind) -> Result<(AuthData, Endpoint)> {
+		let service_target = self.resolve_service_target_without_model(adapter_kind).await?;
+
+		Ok((service_target.auth, service_target.endpoint))
+	}
+
+	/// Resolves a provider target with an empty model name, without model mapping.
+	pub(crate) async fn resolve_service_target_without_model(
+		&self,
+		adapter_kind: AdapterKind,
+	) -> Result<ServiceTarget> {
 		let model = ModelIden::new(adapter_kind, "");
 		let auth = self.run_auth_resolver(model.clone()).await?;
 		let endpoint = self.default_endpoint(adapter_kind);
-
-		let service_target = ServiceTarget { model, auth, endpoint };
-		let service_target = self.run_service_target_resolver(service_target).await?;
-
-		Ok((service_target.auth, service_target.endpoint))
+		self.run_service_target_resolver(ServiceTarget { model, auth, endpoint }).await
 	}
 
 	/// Resolves a ServiceTarget for the given model.

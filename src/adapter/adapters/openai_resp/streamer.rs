@@ -25,6 +25,8 @@ pub struct OpenAIRespStreamer {
 	/// Latest partial (or final) image per `output_index`, materialised as an
 	/// `image_generation_call` output item if the terminal response omits it.
 	partial_image_items: BTreeMap<usize, Value>,
+	final_image_indexes: BTreeSet<usize>,
+	text_parts_seen: BTreeSet<(usize, usize)>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -59,10 +61,18 @@ enum RespStreamEvent {
 	#[serde(rename = "response.output_text.delta")]
 	OutputTextDelta {
 		#[serde(default)]
-		_output_index: usize,
+		output_index: usize,
 		#[serde(default)]
-		_content_index: usize,
+		content_index: usize,
 		delta: String,
+	},
+	#[serde(rename = "response.output_text.done")]
+	OutputTextDone {
+		#[serde(default)]
+		output_index: usize,
+		#[serde(default)]
+		content_index: usize,
+		text: String,
 	},
 
 	#[serde(rename = "response.reasoning_text.delta")]
@@ -149,6 +159,8 @@ impl OpenAIRespStreamer {
 			in_progress_tool_calls: BTreeMap::new(),
 			custom_tool_call_indexes: BTreeSet::new(),
 			partial_image_items: BTreeMap::new(),
+			final_image_indexes: BTreeSet::new(),
+			text_parts_seen: BTreeSet::new(),
 		}
 	}
 
@@ -220,16 +232,11 @@ impl OpenAIRespStreamer {
 			return;
 		}
 
-		let mut items: BTreeMap<usize, Value> = std::mem::take(&mut self.partial_image_items);
 		for (index, item) in output.iter().enumerate() {
-			if item.x_get_str("type").ok() == Some("image_generation_call") {
-				// A final item supersedes the partial image for the same slot.
-				items.insert(index, item.clone());
-			}
+			self.capture_image_item(index, item.clone(), true);
 		}
-
 		let mut parts = Vec::new();
-		for item in items.into_values() {
+		for item in std::mem::take(&mut self.partial_image_items).into_values() {
 			if let Ok(item_parts) = ContentPart::from_resp_output_item(item) {
 				parts.extend(item_parts.into_iter().filter(|part| matches!(part, ContentPart::Binary(_))));
 			}
@@ -237,6 +244,34 @@ impl OpenAIRespStreamer {
 
 		if !parts.is_empty() {
 			self.captured_data.content_parts = Some(parts);
+		}
+	}
+
+	/// Only usable images replace buffered images; final images outrank previews.
+	fn capture_image_item(&mut self, index: usize, item: Value, is_final: bool) {
+		if !self.options.capture_content || (!is_final && self.final_image_indexes.contains(&index)) {
+			return;
+		}
+		if item.get("type").and_then(Value::as_str) != Some("image_generation_call") {
+			return;
+		}
+		let valid = ContentPart::from_resp_output_item(item.clone()).ok().is_some_and(|parts| {
+			parts.iter().any(|part| match part {
+				ContentPart::Binary(binary) => match &binary.source {
+					crate::chat::BinarySource::Base64(data) => {
+						!data.is_empty()
+							&& base64::Engine::decode(&base64::engine::general_purpose::STANDARD, data.as_ref()).is_ok()
+					}
+					crate::chat::BinarySource::Url(url) => !url.trim().is_empty(),
+				},
+				_ => false,
+			})
+		});
+		if valid {
+			self.partial_image_items.insert(index, item);
+			if is_final {
+				self.final_image_indexes.insert(index);
+			}
 		}
 	}
 }
@@ -286,6 +321,7 @@ impl futures::Stream for OpenAIRespStreamer {
 						}
 
 						RespStreamEvent::OutputItemDone { output_index, item } => {
+							self.capture_image_item(output_index, item.clone(), true);
 							let item_type = item.x_get_str("type").ok();
 							// Capture encrypted reasoning blobs from `type: "reasoning"`
 							// items as they finalise. Some Responses-API-shaped proxies
@@ -331,11 +367,32 @@ impl futures::Stream for OpenAIRespStreamer {
 							continue;
 						}
 
-						RespStreamEvent::OutputTextDelta { delta, .. } => {
+						RespStreamEvent::OutputTextDelta {
+							output_index,
+							content_index,
+							delta,
+						} => {
+							if !delta.is_empty() {
+								self.text_parts_seen.insert((output_index, content_index));
+							}
 							if self.options.capture_content {
 								self.captured_data.content.get_or_insert_with(String::new).push_str(&delta);
 							}
 							return Poll::Ready(Some(Ok(InterStreamEvent::Chunk(delta))));
+						}
+
+						RespStreamEvent::OutputTextDone {
+							output_index,
+							content_index,
+							text,
+						} => {
+							if text.is_empty() || !self.text_parts_seen.insert((output_index, content_index)) {
+								continue;
+							}
+							if self.options.capture_content {
+								self.captured_data.content.get_or_insert_default().push_str(&text);
+							}
+							return Poll::Ready(Some(Ok(InterStreamEvent::Chunk(text))));
 						}
 
 						RespStreamEvent::ReasoningTextDelta { delta, .. } => {
@@ -391,7 +448,7 @@ impl futures::Stream for OpenAIRespStreamer {
 							// Keep the newest partial image for this output slot. If the terminal
 							// response never carries the final `image_generation_call` item, this is
 							// what the caller gets to see.
-							self.partial_image_items.insert(
+							self.capture_image_item(
 								output_index,
 								json!({
 									"id": item_id,
@@ -400,6 +457,7 @@ impl futures::Stream for OpenAIRespStreamer {
 									"output_format": output_format,
 									"result": partial_image_b64,
 								}),
+								false,
 							);
 							continue;
 						}
@@ -520,6 +578,7 @@ impl futures::Stream for OpenAIRespStreamer {
 				None => {
 					if !self.done {
 						self.done = true;
+						self.capture_content_parts(&[]);
 						let inter_stream_end = InterStreamEnd {
 							captured_usage: self.captured_data.usage.take(),
 							captured_stop_reason: self.captured_data.stop_reason.take().map(StopReason::from),

@@ -48,6 +48,12 @@ impl WebConfig {
 		self
 	}
 
+	/// Sets the timeout for each network read, independently of the total request timeout.
+	pub fn with_read_timeout(mut self, timeout: Duration) -> Self {
+		self.read_timeout = Some(timeout);
+		self
+	}
+
 	/// Sets default headers.
 	pub fn with_default_headers(mut self, headers: reqwest::header::HeaderMap) -> Self {
 		self.default_headers = Some(headers);

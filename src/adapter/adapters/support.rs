@@ -66,3 +66,11 @@ pub struct StreamerCapturedData {
 pub fn is_reasoning_detail(custom: &crate::chat::CustomPart) -> bool {
 	custom.typ().is_some_and(|typ| typ.starts_with("reasoning."))
 }
+
+/// Legacy endpoint defaults. Explicit provider/target configuration takes precedence.
+pub fn endpoint_from_env(name: &str, fallback: &'static str) -> crate::resolver::Endpoint {
+	match std::env::var(name).ok().filter(|value| !value.trim().is_empty()) {
+		Some(value) => crate::resolver::Endpoint::from_owned(format!("{}/", value.trim().trim_end_matches('/'))),
+		None => crate::resolver::Endpoint::from_static(fallback),
+	}
+}

@@ -129,6 +129,19 @@ impl ChatRequest {
 		self
 	}
 
+	/// Appends a non-streaming assistant tool-use turn and its tool response.
+	pub fn append_tool_use_from_chat_response(
+		mut self,
+		response: &crate::chat::ChatResponse,
+		tool_response: ToolResponse,
+	) -> Self {
+		if let Some(message) = response.assistant_message_for_tool_use() {
+			self.messages.push(message);
+		}
+		self.messages.push(ChatMessage::from(tool_response));
+		self
+	}
+
 	/// Appends a captured assistant tool-use turn followed by its tool response.
 	///
 	/// Captured content is preferred because it preserves part ordering. If no assistant

@@ -55,6 +55,34 @@ impl Adapter for CohereAdapter {
 		Ok(MODELS.iter().map(|s| s.to_string()).collect())
 	}
 
+	/// Query the configured provider rather than using the names-only static fallback.
+	async fn all_models(
+		kind: AdapterKind,
+		endpoint: Endpoint,
+		auth: AuthData,
+		web_client: &WebClient,
+	) -> Result<Vec<crate::Model>> {
+		let api_key = get_api_key(auth, &ModelIden::new(kind, ""))?;
+		let headers = Headers::from(vec![("Authorization", format!("Bearer {api_key}"))]);
+		let url = format!("{}models", endpoint.base_url());
+		let mut response = web_client
+			.do_get(&url, &headers)
+			.await
+			.map_err(|webc_error| Error::WebAdapterCall {
+				adapter_kind: kind,
+				webc_error,
+			})?;
+		let entries: Vec<Value> = response.body.x_take("models")?;
+		let mut models = Vec::new();
+		for mut entry in entries {
+			let name: String = entry.x_take("name")?;
+			if name.starts_with("command") || name.starts_with("c4ai") || name.starts_with("aya-") {
+				models.push(crate::Model::from_capabilities(kind, name));
+			}
+		}
+		Ok(models)
+	}
+
 	fn get_service_url(_model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
 		let base_url = endpoint.base_url();
 		let url = match service_type {

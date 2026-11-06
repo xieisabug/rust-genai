@@ -30,6 +30,19 @@ impl OllamaAdapter {
 		headers: Headers,
 		web_client: &WebClient,
 	) -> Result<Vec<String>> {
+		Self::list_model_entries(adapter_kind, endpoint, headers, web_client)
+			.await?
+			.into_iter()
+			.map(|mut item| Ok(item.x_take::<String>("name")?))
+			.collect()
+	}
+
+	pub(in crate::adapter::adapters) async fn list_model_entries(
+		adapter_kind: AdapterKind,
+		endpoint: Endpoint,
+		headers: Headers,
+		web_client: &WebClient,
+	) -> Result<Vec<Value>> {
 		let base_url = endpoint.base_url();
 		let url = format!("{base_url}api/tags");
 
@@ -41,19 +54,7 @@ impl OllamaAdapter {
 				webc_error,
 			})?;
 
-		let mut models: Vec<String> = Vec::new();
-
-		if let Value::Array(models_value) = res.body.x_take("models")? {
-			for mut model in models_value {
-				let model_name: String = model.x_take("name")?;
-				models.push(model_name);
-			}
-		} else {
-			// TODO: Need to add tracing
-			// error!("OllamaAdapter::list_models did not have any models {res:?}");
-		}
-
-		Ok(models)
+		Ok(res.body.x_take::<Vec<Value>>("models")?)
 	}
 
 	pub(in crate::adapter::adapters) fn into_usage(body: &mut Value) -> Usage {

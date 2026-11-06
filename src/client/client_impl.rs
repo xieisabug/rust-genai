@@ -70,6 +70,11 @@ impl Client {
 		Ok((auth, endpoint))
 	}
 
+	/// Legacy helper for provider operations without a model. Runs auth and target resolvers.
+	pub async fn resolve_service_target_without_model(&self, adapter_kind: AdapterKind) -> Result<ServiceTarget> {
+		self.config().resolve_service_target_without_model(adapter_kind).await
+	}
+
 	/// Returns the bound [`AdapterKind`] for this Client, if any.
 	///
 	/// Set via [`ClientBuilder::with_adapter_kind`] at construction

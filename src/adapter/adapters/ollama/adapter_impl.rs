@@ -44,6 +44,22 @@ impl Adapter for OllamaAdapter {
 		Self::list_model_names(adapter_kind, endpoint, Headers::default(), web_client).await
 	}
 
+	async fn all_models(
+		kind: AdapterKind,
+		endpoint: Endpoint,
+		_auth: AuthData,
+		web_client: &WebClient,
+	) -> Result<Vec<crate::Model>> {
+		Self::list_model_entries(kind, endpoint, Headers::default(), web_client)
+			.await?
+			.into_iter()
+			.map(|mut item| {
+				let id: String = item.x_take("name")?;
+				Ok(crate::Model::from_capabilities(kind, id).with_additional_properties(item))
+			})
+			.collect()
+	}
+
 	fn get_service_url(_model_iden: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {
 		let base_url = endpoint.base_url();
 		match service_type {

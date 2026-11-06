@@ -305,7 +305,7 @@ impl Model {
 			.with_streaming(supports_streaming)
 			.with_tool_calls(supports_tool_calls)
 			.with_json_mode(supports_json_mode)
-			.with_reasoning(supports_reasoning)
 			.with_reasoning_efforts(reasoning_efforts)
+			.with_reasoning(supports_reasoning)
 	}
 }

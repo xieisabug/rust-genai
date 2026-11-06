@@ -730,6 +730,19 @@ impl AnthropicAdapter {
 		auth: AuthData,
 		web_client: &WebClient,
 	) -> Result<Vec<String>> {
+		Self::list_model_entries(kind, endpoint, auth, web_client)
+			.await?
+			.into_iter()
+			.map(|mut item| Ok(item.x_take::<String>("id")?))
+			.collect()
+	}
+
+	pub(in crate::adapter::adapters) async fn list_model_entries(
+		kind: AdapterKind,
+		endpoint: Endpoint,
+		auth: AuthData,
+		web_client: &WebClient,
+	) -> Result<Vec<Value>> {
 		// -- url
 		let base_url = endpoint.base_url();
 		let url = format!("{base_url}models");
@@ -754,17 +767,7 @@ impl AnthropicAdapter {
 				webc_error,
 			})?;
 
-		// -- Format result
-		let mut models: Vec<String> = Vec::new();
-
-		if let Value::Array(models_value) = res.body.x_take("data")? {
-			for mut model in models_value {
-				let model_name: String = model.x_take("id")?;
-				models.push(model_name);
-			}
-		}
-
-		Ok(models)
+		Ok(res.body.x_take::<Vec<Value>>("data")?)
 	}
 
 	fn tool_to_anthropic_tool(tool: Tool) -> Result<Value> {

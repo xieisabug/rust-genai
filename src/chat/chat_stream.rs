@@ -378,6 +378,19 @@ impl StreamEnd {
 		)
 	}
 
+	/// Builds a tool-use assistant message without consuming the response.
+	pub fn assistant_message_for_tool_use(&self) -> Option<ChatMessage> {
+		let content = self.captured_content.as_ref()?;
+		if content.tool_calls().is_empty() {
+			return None;
+		}
+		let mut message = ChatMessage::assistant(content.clone());
+		if !content.contains_reasoning_content() {
+			message = message.with_reasoning_content(self.captured_reasoning_content.clone());
+		}
+		Some(message)
+	}
+
 	/// Convenience: build an assistant message for a tool-use handoff that places
 	/// thought signatures (if any) before tool calls. Returns None if no tool calls
 	/// were captured.

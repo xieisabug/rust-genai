@@ -2,7 +2,7 @@ name: Yakbak Replay Tests
 
 on:
   push:
-    branches: [main]
+    branches: [main, main-sync]
   pull_request:
     branches: [main]
 
@@ -31,6 +31,9 @@ jobs:
 
       - name: Run OpenAI replay tests
         run: cargo test --test tests_yakbak_openai_resp
+
+      - name: Run library and fork migration regressions
+        run: cargo test --lib --test tests_main_sync_regressions
 
       - name: Run Gemini replay tests
         run: cargo test --test tests_yakbak_gemini

@@ -6,6 +6,7 @@ use crate::resolver::{AuthData, Endpoint};
 use crate::webc::StreamRequest as RequestBuilder;
 use crate::webc::{EventSourceStream, WebClient, WebResponse};
 use crate::{Result, ServiceTarget};
+use value_ext::JsonValueExt;
 
 pub struct AnthropicAdapter;
 
@@ -18,7 +19,7 @@ impl Adapter for AnthropicAdapter {
 
 	fn default_endpoint(_kind: AdapterKind) -> Endpoint {
 		const BASE_URL: &str = "https://api.anthropic.com/v1/";
-		Endpoint::from_static(BASE_URL)
+		crate::adapter::adapters::support::endpoint_from_env("ANTHROPIC_BASE_URL", BASE_URL)
 	}
 
 	fn default_auth(_kind: AdapterKind) -> AuthData {
@@ -35,6 +36,22 @@ impl Adapter for AnthropicAdapter {
 		web_client: &WebClient,
 	) -> Result<Vec<String>> {
 		Self::list_model_names_for_end_target(kind, endpoint, auth, web_client).await
+	}
+
+	async fn all_models(
+		kind: AdapterKind,
+		endpoint: Endpoint,
+		auth: AuthData,
+		web_client: &WebClient,
+	) -> Result<Vec<crate::Model>> {
+		Self::list_model_entries(kind, endpoint, auth, web_client)
+			.await?
+			.into_iter()
+			.map(|mut item| {
+				let id: String = item.x_take("id")?;
+				Ok(crate::Model::from_capabilities(kind, id).with_additional_properties(item))
+			})
+			.collect()
 	}
 
 	fn get_service_url(_model: &ModelIden, service_type: ServiceType, endpoint: Endpoint) -> Result<String> {

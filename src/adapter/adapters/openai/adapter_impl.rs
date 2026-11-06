@@ -31,7 +31,7 @@ impl Adapter for OpenAIAdapter {
 
 	fn default_endpoint(_kind: AdapterKind) -> Endpoint {
 		const BASE_URL: &str = "https://api.openai.com/v1/";
-		Endpoint::from_static(BASE_URL)
+		crate::adapter::adapters::support::endpoint_from_env("OPENAI_BASE_URL", BASE_URL)
 	}
 
 	/// Note: Currently returns the common models (see above)
