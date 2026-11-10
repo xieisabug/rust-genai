@@ -47,6 +47,9 @@ pub enum Error {
 	#[display("Failed to parse prompt cache retention. Actual: '{actual}'")]
 	PromptCacheRetentionParsing { actual: String },
 
+	#[display("Invalid OpenAI Responses prompt_cache_options.ttl '{actual}': expected '30m' or '12h'")]
+	PromptCacheTtlParsing { actual: String },
+
 	// -- Chat Output
 	#[display("No chat response from model '{model_iden}'")]
 	NoChatResponse { model_iden: ModelIden },

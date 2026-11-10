@@ -74,6 +74,7 @@ bytes = "1.6"
 # -- File
 base64 = "0.23.0"
 mime_guess = "2"
+dirs = "5.0.1"
 # -- Macro uttils
 pastey = "0.2"
 macro_rules_attribute = "0.2.2"

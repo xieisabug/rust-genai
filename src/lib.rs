@@ -19,6 +19,7 @@ pub mod adapter;
 pub mod chat;
 pub mod embed;
 pub mod resolver;
+pub mod providers;
 pub mod webc;
 
 // -- OpenTelemetry GenAI instrumentation (feature `otel`, off by default)

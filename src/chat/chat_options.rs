@@ -110,6 +110,9 @@ pub struct ChatOptions {
 	/// OpenAI prompt cache key.
 	pub prompt_cache_key: Option<String>,
 
+	/// Explicit minimum cache lifetime for OpenAI Responses.
+	pub prompt_cache_ttl: Option<String>,
+
 	/// Provider-specific extra request payload merged by the adapter.
 	///
 	/// This is primarily useful for OpenAI-compatible providers that expose
@@ -280,6 +283,12 @@ impl ChatOptions {
 	/// Sets the OpenAI prompt cache key.
 	pub fn with_prompt_cache_key(mut self, key: impl Into<String>) -> Self {
 		self.prompt_cache_key = Some(key.into());
+		self
+	}
+
+	/// Sets `prompt_cache_options.ttl` for the Responses API.
+	pub fn with_prompt_cache_ttl(mut self, ttl: impl Into<String>) -> Self {
+		self.prompt_cache_ttl = Some(ttl.into());
 		self
 	}
 
@@ -692,6 +701,12 @@ impl ChatOptionsSet<'_, '_> {
 		self.chat
 			.and_then(|chat| chat.prompt_cache_key.as_deref())
 			.or_else(|| self.client.and_then(|client| client.prompt_cache_key.as_deref()))
+	}
+
+	pub fn prompt_cache_ttl(&self) -> Option<&str> {
+		self.chat
+			.and_then(|chat| chat.prompt_cache_ttl.as_deref())
+			.or_else(|| self.client.and_then(|client| client.prompt_cache_ttl.as_deref()))
 	}
 
 	pub fn extra_body(&self) -> Option<&Value> {

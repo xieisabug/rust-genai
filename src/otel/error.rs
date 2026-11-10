@@ -26,6 +26,7 @@ pub fn error_type(error: &Error) -> String {
 		Error::ReasoningParsingError { .. } => "reasoning_parsing".to_string(),
 		Error::ServiceTierParsing { .. } => "service_tier_parsing".to_string(),
 		Error::PromptCacheRetentionParsing { .. } => "prompt_cache_retention_parsing".to_string(),
+		Error::PromptCacheTtlParsing { .. } => "prompt_cache_ttl_parsing".to_string(),
 
 		// -- Output / response shaping
 		Error::NoChatResponse { .. } => "no_chat_response".to_string(),

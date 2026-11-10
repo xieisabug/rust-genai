@@ -625,3 +625,68 @@ fn test_openai_resp_to_chat_response_incomplete_reason_sets_stop_reason() -> Res
 
 	Ok(())
 }
+
+#[test]
+fn test_openai_resp_explicit_ttl_preserves_upstream_mode_and_overrides_legacy_retention() {
+    for ttl in ["30m", "12h"] {
+        for explicit_placement in [false, true] {
+            let target = ServiceTarget {
+                model: ModelIden::new(AdapterKind::OpenAIResp, "gpt-5.6"),
+                auth: AuthData::from_single("test-key"),
+                endpoint: OpenAIRespAdapter::default_endpoint(AdapterKind::OpenAIResp),
+            };
+            let options = ChatOptions::default()
+                .with_cache_control(CacheControl::Ephemeral24h)
+                .with_prompt_cache_ttl(ttl);
+            let options_set = ChatOptionsSet::default().with_chat_options(Some(&options));
+            let message = ChatMessage::user("hello");
+            let message = if explicit_placement { message.with_options(CacheControl::Ephemeral) } else { message };
+            let request = OpenAIRespAdapter::to_web_request_data(
+                target, ServiceType::Chat, ChatRequest::new(vec![message]), options_set,
+            ).expect("explicit TTL should serialize");
+            // General cache intent leaves mode selection to the API; only
+            // per-message placement causes upstream to add explicit mode.
+            if explicit_placement {
+                assert_eq!(request.payload["prompt_cache_options"]["mode"], "explicit");
+            } else {
+                assert!(request.payload["prompt_cache_options"].get("mode").is_none());
+            }
+            assert_eq!(request.payload["prompt_cache_options"]["ttl"], ttl);
+            assert!(request.payload.get("prompt_cache_retention").is_none());
+        }
+    }
+}
+
+#[test]
+fn test_openai_resp_explicit_ttl_per_call_overrides_client_default() {
+    let client = ChatOptions::default().with_prompt_cache_ttl("12h");
+    let chat = ChatOptions::default().with_prompt_cache_ttl("30m");
+    for (chat, ttl) in [(None, "12h"), (Some(&chat), "30m")] {
+        let target = ServiceTarget {
+            model: ModelIden::new(AdapterKind::OpenAIResp, "custom-model"),
+            auth: AuthData::from_single("test-key"),
+            endpoint: Endpoint::from_static("http://localhost/v1/"),
+        };
+        let options = ChatOptionsSet::default().with_client_options(Some(&client)).with_chat_options(chat);
+        let request = OpenAIRespAdapter::to_web_request_data(
+            target, ServiceType::Chat, ChatRequest::from_user("hello"), options,
+        ).unwrap();
+        assert_eq!(request.payload["prompt_cache_options"]["ttl"], ttl);
+        assert!(request.payload["prompt_cache_options"].get("mode").is_none());
+    }
+}
+
+#[test]
+fn test_openai_resp_explicit_ttl_rejects_unsupported_value() {
+	let target = ServiceTarget {
+		model: ModelIden::new(AdapterKind::OpenAIResp, "gpt-5.6"),
+		auth: AuthData::from_single("test-key"),
+		endpoint: OpenAIRespAdapter::default_endpoint(AdapterKind::OpenAIResp),
+	};
+	let options = ChatOptions::default().with_prompt_cache_ttl("24h");
+	let options_set = ChatOptionsSet::default().with_chat_options(Some(&options));
+	let result = OpenAIRespAdapter::to_web_request_data(
+		target, ServiceType::Chat, ChatRequest::from_user("hello"), options_set,
+	);
+	assert!(matches!(result, Err(Error::PromptCacheTtlParsing { actual }) if actual == "24h"));
+}

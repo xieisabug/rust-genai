@@ -227,6 +227,9 @@ See all in [CHANGELOG](CHANGELOG.md) and [v0.7.0 migration guide](docs/migration
 
 ## Usage
 
+- [Magpie gateway integration and explicit Responses cache TTL](docs/magpie.md)
+
+
 | Property                    | OpenAI Compatibles (1)      | Anthropic `usage.`      | Gemini `usageMetadata.`    | Cohere `meta.tokens.` |
 | --------------------------- | --------------------------- | ----------------------- | -------------------------- | --------------------- |
 | `prompt_tokens`             | `prompt_tokens`             | `input_tokens` (added)  | `promptTokenCount` (2)     | `input_tokens`        |

@@ -281,7 +281,15 @@ impl Adapter for OpenAIRespAdapter {
 		if let Some(prompt_cache_key) = chat_options.prompt_cache_key() {
 			payload.x_insert("prompt_cache_key", prompt_cache_key)?;
 		}
-		if !requires_explicit_cache(model_name)
+		if let Some(ttl) = chat_options.prompt_cache_ttl() {
+			if !matches!(ttl, "30m" | "12h") {
+				return Err(Error::PromptCacheTtlParsing { actual: ttl.to_string() });
+			}
+			// Preserve the upstream explicit-cache mode when present.
+			let mut options = payload.get("prompt_cache_options").cloned().unwrap_or_else(|| json!({}));
+			options.x_insert("ttl", ttl)?;
+			payload.x_insert("prompt_cache_options", options)?;
+		} else if !requires_explicit_cache(model_name)
 			&& let Some(cache_control) = chat_options.cache_control()
 		{
 			let prompt_cache_retention = match cache_control {
