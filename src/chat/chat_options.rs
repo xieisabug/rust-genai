@@ -81,6 +81,9 @@ pub struct ChatOptions {
 	/// Note: Additional formats may be added in the future.
 	pub response_format: Option<ChatResponseFormat>,
 
+	/// Enable DeepSeek Flash's hosted web search and URL reader.
+	pub deepseek_web: Option<bool>,
+
 	/// Tool selection preference, when the provider supports function/tool calling.
 	pub tool_choice: Option<ToolChoice>,
 
@@ -707,6 +710,11 @@ impl ChatOptionsSet<'_, '_> {
 		self.chat
 			.and_then(|chat| chat.prompt_cache_ttl.as_deref())
 			.or_else(|| self.client.and_then(|client| client.prompt_cache_ttl.as_deref()))
+	}
+
+	pub fn deepseek_web(&self) -> bool {
+		self.chat.and_then(|options| options.deepseek_web)
+			.or_else(|| self.client.and_then(|options| options.deepseek_web)).unwrap_or(false)
 	}
 
 	pub fn extra_body(&self) -> Option<&Value> {

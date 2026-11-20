@@ -663,3 +663,29 @@ fn payload(
 }
 
 // endregion: --- Support
+
+#[test]
+fn test_deepseek_web_mixed_stream_replays_signed_calls() -> Result<()> {
+	let model = ModelIden::new(AdapterKind::DeepSeek, "deepseek-flash");
+	let calls = json!([{"index":0, "calls":[{"signature":"opaque", "action":{"type":"search"}}]}]);
+	let mut web = super::super::deepseek_web::DeepSeekWeb::default();
+	web.capture(&json!({"server_tool_event":{"type":"call_started"}}), "delta");
+	web.capture(&json!({"finish_reason":"tool_calls","delta":{"server_tool_calls":calls,
+		"annotations":[{"type":"url_citation"}]}}), "delta");
+	let part = web.into_part(&model).unwrap();
+	let ContentPart::Custom(ref custom) = part else { panic!("expected custom part") };
+	assert_eq!(custom.data["events"][0]["type"], "call_started");
+	assert_eq!(custom.data["annotations"][0]["type"], "url_citation");
+	let options = ChatOptions { deepseek_web: Some(true), ..Default::default() };
+	let target = ServiceTarget { model, auth: AuthData::from_single("test"), endpoint: Endpoint::from_static("https://example.com/") };
+	let request = ChatRequest::new(vec![ChatMessage::assistant(MessageContent::from_parts(vec![part]))])
+		.with_tools(vec![Tool::new("client_tool")]);
+	let wire = OpenAIAdapter::util_to_web_request_data(target, crate::adapter::ServiceType::Chat, request,
+		ChatOptionsSet::default().with_chat_options(Some(&options)), None)?.payload;
+	assert_eq!(wire["tools"][0]["type"], "function");
+	assert_eq!(wire["tools"][1]["type"], "deepseek_web_search");
+	assert_eq!(wire["tools"][2]["type"], "deepseek_read_url");
+	assert_eq!(wire["messages"][0]["server_tool_calls"], calls);
+	assert!(wire["messages"][0].get("annotations").is_none());
+	Ok(())
+}

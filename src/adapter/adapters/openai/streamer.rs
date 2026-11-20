@@ -131,6 +131,7 @@ pub struct OpenAIStreamer {
 	tool_call_slots: ToolCallSlots,
 	/// OpenRouter's streamed `reasoning_details`, merged back into whole blocks.
 	reasoning_details: Vec<Value>,
+	deepseek_web: super::deepseek_web::DeepSeekWeb,
 	/// Tool calls by the stream's `index`. The stream sets it, so a map keeps a large or sparse one
 	/// from allocating or inventing slots for calls that never came.
 	tool_calls: BTreeMap<u32, ToolCall>,
@@ -148,6 +149,7 @@ impl OpenAIStreamer {
 			pending_events: VecDeque::new(),
 			tool_call_slots: ToolCallSlots::default(),
 			reasoning_details: Vec::new(),
+			deepseek_web: Default::default(),
 			tool_calls: BTreeMap::new(),
 		}
 	}
@@ -347,7 +349,8 @@ impl futures::Stream for OpenAIStreamer {
 							captured_tool_calls,
 							captured_thought_signatures: None,
 							captured_thought_blocks,
-							captured_content_parts: None,
+							captured_content_parts: std::mem::take(&mut self.deepseek_web)
+								.into_part(&self.options.model_iden).map(|part| vec![part]),
 							captured_response_id: None,
 						};
 
@@ -375,6 +378,9 @@ impl futures::Stream for OpenAIStreamer {
 						// -- Delta content
 						// One chunk can carry several pieces (reasoning and content, or more than one
 						// `delta.tool_calls` entry). Queue an event for each, in that order.
+						if adapter_kind == AdapterKind::DeepSeek {
+							self.deepseek_web.capture(&first_choice, "delta");
+						}
 						self.queue_delta_text(&mut first_choice);
 						if self.options.capture_reasoning_content
 							&& let Ok(details) = first_choice.x_take::<Value>("/delta/reasoning_details")

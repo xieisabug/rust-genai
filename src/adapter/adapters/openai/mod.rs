@@ -19,3 +19,5 @@ pub use adapter_shared::*;
 pub use streamer::*;
 
 // endregion: --- Modules
+
+mod deepseek_web;

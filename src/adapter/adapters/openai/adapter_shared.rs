@@ -123,7 +123,7 @@ impl OpenAIAdapter {
 
 		// -- Build the basic payload
 
-		let OpenAIRequestParts { messages, tools } =
+		let OpenAIRequestParts { messages, mut tools } =
 			Self::into_openai_request_parts(&model, chat_req, prompt_cache_policy.as_ref())?;
 		let mut payload = json!({
 			"model": model_name,
@@ -164,6 +164,10 @@ impl OpenAIAdapter {
 		}
 
 		// -- Tools (before messages)
+		if options_set.deepseek_web() && model.adapter_kind == AdapterKind::DeepSeek && model_name == "deepseek-flash" {
+			let tools = tools.get_or_insert_with(Vec::new);
+			tools.extend([json!({"type": "deepseek_web_search"}), json!({"type": "deepseek_read_url"})]);
+		}
 		if let Some(tools) = tools {
 			payload.x_insert("/tools", tools)?;
 		}
@@ -427,6 +431,7 @@ impl OpenAIAdapter {
 					let mut tool_calls: Vec<Value> = Vec::new();
 					let mut reasoning_parts: Vec<String> = Vec::new();
 					let mut reasoning_details: Vec<Value> = Vec::new();
+					let mut server_tool_calls = None;
 					for part in msg.content {
 						match part {
 							ContentPart::Text(text) => texts.push(text),
@@ -458,6 +463,10 @@ impl OpenAIAdapter {
 									reasoning_details.push(custom.data)
 								}
 							}
+							ContentPart::Custom(custom) if model_iden.adapter_kind == AdapterKind::DeepSeek
+								&& custom.adapter_kind() == Some(AdapterKind::DeepSeek) && custom.typ() == Some("deepseek_web") => {
+								server_tool_calls = custom.data.get("server_tool_calls").cloned();
+							}
 							// Other Custom parts are ignored for this logic
 							ContentPart::Custom(_) => {}
 						}
@@ -473,6 +482,9 @@ impl OpenAIAdapter {
 						let content = texts.join("\n\n");
 						json!({"role": "assistant", "content": content})
 					};
+					if let Some(calls) = server_tool_calls {
+						message.x_insert("server_tool_calls", calls)?;
+					}
 					if !tool_calls.is_empty() {
 						message.x_insert("tool_calls", tool_calls)?;
 					}

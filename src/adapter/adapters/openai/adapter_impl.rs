@@ -86,6 +86,12 @@ impl Adapter for OpenAIAdapter {
 				.flatten()
 				.map(StopReason::from);
 
+			if model_iden.adapter_kind == AdapterKind::DeepSeek {
+				let mut web = super::deepseek_web::DeepSeekWeb::default();
+				web.capture(&first_choice, "message");
+				if let Some(part) = web.into_part(&model_iden) { content.push(part); }
+			}
+
 			// Check if reasoning is present
 			// Can be in two places:
 			// - /message/reasoning
