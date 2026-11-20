@@ -463,3 +463,42 @@ async fn endpoint_environment_child() {
 		);
 	}
 }
+
+#[tokio::test]
+async fn test_deepseek_web_stream_round_trip_with_client_tool() {
+	let calls = json!([{"index":0,"calls":[{"type":"deepseek_read_url","kind":"read_link",
+		"action":{"type":"read_link","url":"https://example.org"},"signature":"opaque-page"}]}]);
+	let events = [
+		json!({"choices":[{"server_tool_event":{"type":"call_completed","step":0},"delta":{}}]}),
+		json!({"choices":[{"finish_reason":"tool_calls","delta":{"content":"read","server_tool_calls":calls,
+			"annotations":[{"type":"url_citation"}],"tool_calls":[{"index":0,"id":"client-1","type":"function",
+			"function":{"name":"record","arguments":"{}"}}]}}]}),
+	];
+	let body = events.iter().map(|v| format!("data: {v}\n\n")).collect::<String>() + "data: [DONE]\n\n";
+	let (endpoint, first) = serve(body, "text/event-stream").await;
+	let target = |endpoint| ServiceTarget { endpoint, auth: AuthData::from_single("fixture"),
+		model: ModelIden::new(AdapterKind::DeepSeek, "deepseek-flash") };
+	let options = ChatOptions { deepseek_web: Some(true), capture_tool_calls: Some(true),
+		capture_content: Some(true), ..Default::default() };
+	let mut stream = client().exec_chat_stream(target(endpoint), ChatRequest::from_user("read"), Some(&options))
+		.await.unwrap().stream;
+	let mut response = None;
+	while let Some(event) = stream.next().await {
+		if let ChatStreamEvent::End(end) = event.unwrap() { response = end.captured_content; }
+	}
+	let content = response.unwrap();
+	assert_eq!(content.custom_parts()[0].data["events"][0]["type"], "call_completed");
+	assert_eq!(content.custom_parts()[0].data["annotations"][0]["type"], "url_citation");
+	assert_eq!(content.tool_calls()[0].call_id, "client-1");
+	assert!(first.await.unwrap().contains("deepseek_read_url"));
+	let answer = json!({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"done","server_tool_calls":calls}}]});
+	let (endpoint, second) = serve(answer.to_string(), "application/json").await;
+	let history = vec![genai::chat::ChatMessage::assistant(content), ToolResponse::new("client-1","ok").into()];
+	let result = client().exec_chat(target(endpoint), ChatRequest::new(history), Some(&options)).await.unwrap();
+	assert_eq!(result.content.custom_parts()[0].data["server_tool_calls"], calls);
+	let raw = second.await.unwrap();
+	let request: Value = serde_json::from_str(raw.split_once("\r\n\r\n").unwrap().1).unwrap();
+	assert_eq!(request["messages"][0]["server_tool_calls"], calls);
+	assert_eq!(request["messages"][0]["tool_calls"][0]["id"], "client-1");
+	assert_eq!(request["messages"][1]["tool_call_id"], "client-1");
+}
