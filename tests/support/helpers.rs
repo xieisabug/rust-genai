@@ -110,6 +110,7 @@ pub async fn extract_stream_end(mut chat_stream: ChatStream) -> TestResult<Strea
 				break;
 			}
 			ChatStreamEvent::Heartbeat => heartbeat_count += 1,
+			ChatStreamEvent::Custom(_) => (),
 		}
 	}
 

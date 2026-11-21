@@ -1,5 +1,5 @@
 use crate::adapter::inter_stream::{InterStreamEnd, InterStreamEvent, InterStreamThoughtBlock};
-use crate::chat::{ChatMessage, ContentPart, MessageContent, StopReason, ToolCall, Usage};
+use crate::chat::{ChatMessage, ContentPart, CustomPart, MessageContent, StopReason, ToolCall, Usage};
 use crate::webc::FrameTap;
 use futures::Stream;
 use serde::{Deserialize, Serialize};
@@ -95,6 +95,7 @@ impl Stream for ChatStream {
 					InterStreamEvent::ToolCallChunk(tool_call) => {
 						ChatStreamEvent::ToolCallChunk(ToolChunk { tool_call })
 					}
+					InterStreamEvent::Custom(part) => ChatStreamEvent::Custom(part),
 					InterStreamEvent::Heartbeat => ChatStreamEvent::Heartbeat,
 					InterStreamEvent::End(inter_end) => ChatStreamEvent::End(inter_end.into()),
 				};
@@ -169,6 +170,12 @@ pub enum ChatStreamEvent {
 
 	/// Tool-call chunk.
 	ToolCallChunk(ToolChunk),
+
+	/// Provider-specific live event with no provider-agnostic equivalent, emitted as it
+	/// arrives so callers can show progress before the stream ends. `data["type"]` names it,
+	/// e.g. `deepseek_web_event` carries one DeepSeek `server_tool_event` under `data["event"]`.
+	/// The same information is also part of the captured content at the end of the stream.
+	Custom(CustomPart),
 
 	/// End of stream.
 	/// May include captured usage and/or content when enabled via `ChatOptions`.

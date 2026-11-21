@@ -1,4 +1,4 @@
-use crate::{ModelIden, adapter::AdapterKind, chat::ContentPart};
+use crate::{ModelIden, adapter::AdapterKind, chat::{ContentPart, CustomPart}};
 use serde_json::{Value, json};
 
 /// Keep the provider-signed calls intact. Only server_tool_calls are echoed on the wire.
@@ -10,8 +10,10 @@ pub(super) struct DeepSeekWeb {
 }
 
 impl DeepSeekWeb {
-	pub fn capture(&mut self, choice: &Value, body: &str) {
-		if let Some(event) = choice.get("server_tool_event").filter(|v| v.is_object()) {
+	/// Records one choice and returns its `server_tool_event`, if any, for live delivery.
+	pub fn capture(&mut self, choice: &Value, body: &str) -> Option<Value> {
+		let event = choice.get("server_tool_event").filter(|v| v.is_object()).cloned();
+		if let Some(event) = &event {
 			self.events.push(event.clone());
 		}
 		let body = &choice[body];
@@ -20,6 +22,12 @@ impl DeepSeekWeb {
 				*target = Some(value.clone());
 			}
 		}
+		event
+	}
+
+	/// A live `server_tool_event` as a stream event part: `{"type":"deepseek_web_event","event":…}`.
+	pub fn live_event(model: &ModelIden, event: Value) -> CustomPart {
+		CustomPart { model_iden: Some(model.clone()), data: json!({"type": "deepseek_web_event", "event": event}) }
 	}
 
 	pub fn into_part(self, model: &ModelIden) -> Option<ContentPart> {

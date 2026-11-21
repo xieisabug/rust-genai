@@ -378,8 +378,11 @@ impl futures::Stream for OpenAIStreamer {
 						// -- Delta content
 						// One chunk can carry several pieces (reasoning and content, or more than one
 						// `delta.tool_calls` entry). Queue an event for each, in that order.
-						if adapter_kind == AdapterKind::DeepSeek {
-							self.deepseek_web.capture(&first_choice, "delta");
+						if adapter_kind == AdapterKind::DeepSeek
+							&& let Some(event) = self.deepseek_web.capture(&first_choice, "delta")
+						{
+							let part = super::deepseek_web::DeepSeekWeb::live_event(&self.options.model_iden, event);
+							self.pending_events.push_back(InterStreamEvent::Custom(part));
 						}
 						self.queue_delta_text(&mut first_choice);
 						if self.options.capture_reasoning_content

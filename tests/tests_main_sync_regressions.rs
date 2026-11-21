@@ -482,10 +482,21 @@ async fn test_deepseek_web_stream_round_trip_with_client_tool() {
 		capture_content: Some(true), ..Default::default() };
 	let mut stream = client().exec_chat_stream(target(endpoint), ChatRequest::from_user("read"), Some(&options))
 		.await.unwrap().stream;
-	let mut response = None;
+	let (mut response, mut live, mut text_before_live) = (None, Vec::new(), false);
 	while let Some(event) = stream.next().await {
-		if let ChatStreamEvent::End(end) = event.unwrap() { response = end.captured_content; }
+		match event.unwrap() {
+			ChatStreamEvent::Custom(part) => live.push(part),
+			ChatStreamEvent::Chunk(_) => text_before_live |= live.is_empty(),
+			ChatStreamEvent::End(end) => response = end.captured_content,
+			_ => {}
+		}
 	}
+	// The server tool event is delivered live, before the answer text, and still captured at the end.
+	assert_eq!(live.len(), 1);
+	assert!(!text_before_live);
+	assert_eq!(live[0].typ(), Some("deepseek_web_event"));
+	assert_eq!(live[0].adapter_kind(), Some(AdapterKind::DeepSeek));
+	assert_eq!(live[0].data["event"]["type"], "call_completed");
 	let content = response.unwrap();
 	assert_eq!(content.custom_parts()[0].data["events"][0]["type"], "call_completed");
 	assert_eq!(content.custom_parts()[0].data["annotations"][0]["type"], "url_citation");

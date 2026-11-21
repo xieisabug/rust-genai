@@ -185,7 +185,10 @@ async fn test_yakbak_ollama_ndjson_multi_event_order() -> TestResult<()> {
 				labels.push(format!("tool:{}:{}", tc.tool_call.call_id, tc.tool_call.fn_name))
 			}
 			ChatStreamEvent::End(_) => labels.push("end".to_string()),
-			ChatStreamEvent::Start | ChatStreamEvent::Heartbeat | ChatStreamEvent::ThoughtSignatureChunk(_) => (),
+			ChatStreamEvent::Start
+			| ChatStreamEvent::Heartbeat
+			| ChatStreamEvent::ThoughtSignatureChunk(_)
+			| ChatStreamEvent::Custom(_) => (),
 		}
 	}
 

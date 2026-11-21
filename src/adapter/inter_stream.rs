@@ -61,6 +61,8 @@ pub enum InterStreamEvent {
 	ReasoningChunk(String),
 	ThoughtSignatureChunk(String),
 	ToolCallChunk(crate::chat::ToolCall),
+	/// Provider-specific live event (see `ChatStreamEvent::Custom`).
+	Custom(CustomPart),
 	Heartbeat,
 	End(InterStreamEnd),
 }

@@ -152,6 +152,14 @@ async fn print_chat_stream_inner(
 						}
 					}
 
+					ChatStreamEvent::Custom(part) => {
+						if print_events {
+							(Some(format!("\n-- ChatStreamEvent::Custom: {}\n", part.data)), None, false)
+						} else {
+							(None, None, false)
+						}
+					}
+
 					ChatStreamEvent::Heartbeat => {
 						// Liveness only — not user-facing content.
 						(None, None, false)

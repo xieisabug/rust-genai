@@ -121,6 +121,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 			ChatStreamEvent::Heartbeat => {
 				println!("  Heartbeat");
 			}
+			ChatStreamEvent::Custom(part) => {
+				println!("  Custom event: {}", part.data);
+			}
 		}
 	}
 
