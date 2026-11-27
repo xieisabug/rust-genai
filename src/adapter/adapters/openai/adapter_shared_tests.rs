@@ -689,3 +689,31 @@ fn test_deepseek_web_mixed_stream_replays_signed_calls() -> Result<()> {
 	assert!(wire["messages"][0].get("annotations").is_none());
 	Ok(())
 }
+
+#[test]
+fn test_usage_deepseek_cache_hit_alias() {
+	for adapter in [AdapterKind::OpenAI, AdapterKind::DeepSeek] {
+		let raw = json!({"prompt_tokens":100,"completion_tokens":20,"total_tokens":120,"prompt_cache_hit_tokens":80,"prompt_cache_miss_tokens":20});
+		for (nested, expected) in [(None,Some(80)), (Some(80),Some(80)), (Some(70),Some(70)), (Some(0),None)] {
+			let mut raw = raw.clone();
+			if let Some(value) = nested {
+				raw["prompt_tokens_details"] = json!({"cached_tokens":value});
+			}
+			let usage = OpenAIAdapter::into_usage(adapter, raw);
+			assert_eq!(usage.prompt_tokens_details.and_then(|d| d.cached_tokens), expected);
+			assert_eq!((usage.prompt_tokens, usage.total_tokens), (Some(100), Some(120)));
+		}
+	}
+}
+
+#[test]
+fn test_usage_xai_inclusive_and_separate_reasoning() {
+	for (input, output, reasoning, total, expected) in [(26,168,304,498,472), (100,20,5,120,20)] {
+		let usage = OpenAIAdapter::into_usage(AdapterKind::Xai, json!({
+			"prompt_tokens": input, "completion_tokens": output, "total_tokens": total,
+			"completion_tokens_details": { "reasoning_tokens": reasoning }
+		}));
+		assert_eq!(usage.completion_tokens, Some(expected));
+		assert_eq!(input + expected, total);
+	}
+}

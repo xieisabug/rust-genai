@@ -25,12 +25,12 @@ fn take_finish_reason_usage(message_data: &mut Value, adapter_kind: AdapterKind,
 		return None;
 	}
 
-	let path = match adapter_kind {
-		AdapterKind::Groq => "/x_groq/usage",
-		_ => "usage",
-	};
-
-	take_usage(message_data, path, adapter_kind)
+	if adapter_kind == AdapterKind::Groq
+		&& let Some(usage) = take_usage(message_data, "/x_groq/usage", adapter_kind)
+	{
+		return Some(usage);
+	}
+	take_usage(message_data, "usage", adapter_kind)
 }
 
 fn take_usage(message_data: &mut Value, path: &str, adapter_kind: AdapterKind) -> Option<Usage> {
@@ -59,15 +59,26 @@ fn capture_usage_tail(
 	adapter_kind: AdapterKind,
 	capture_usage: bool,
 ) {
-	if !capture_usage || matches!(adapter_kind, AdapterKind::Groq) {
+	if !capture_usage {
 		return;
 	}
-
-	if captured_usage.as_ref().is_some_and(usage_has_token_counts) {
-		return;
-	}
-
-	if let Some(usage) = take_usage(message_data, "usage", adapter_kind) {
+	let Some(raw) = message_data.get("usage") else { return };
+	let has_prompt_details = raw.get("prompt_tokens_details").is_some() || raw.get("prompt_cache_hit_tokens").is_some();
+	let has_output_details = raw.get("completion_tokens_details").is_some();
+	if let Some(mut usage) = take_usage(message_data, "usage", adapter_kind) {
+		// A complete final report describes the entire request. Keep an inline
+		// report when a nonstandard tail has only a subset of the counters.
+		if let Some(previous) = captured_usage.as_mut().filter(|u| usage_has_token_counts(u)) {
+			if usage.prompt_tokens.is_none() || usage.completion_tokens.is_none() || usage.total_tokens.is_none() {
+				return;
+			}
+			if !has_prompt_details && usage.prompt_tokens == previous.prompt_tokens {
+				usage.prompt_tokens_details = previous.prompt_tokens_details.take();
+			}
+			if !has_output_details && usage.completion_tokens == previous.completion_tokens {
+				usage.completion_tokens_details = previous.completion_tokens_details.take();
+			}
+		}
 		*captured_usage = Some(usage);
 	}
 }
@@ -721,6 +732,36 @@ mod tests {
 		assert_eq!(usage.prompt_tokens, Some(259));
 		assert_eq!(usage.completion_tokens, Some(16));
 		assert_eq!(usage.total_tokens, Some(275));
+	}
+
+	#[test]
+	fn test_usage_tail_supersedes_inline_partial_counts_and_honors_explicit_zero() {
+		let mut usage = Some(OpenAIAdapter::into_usage(AdapterKind::OpenAI,
+			serde_json::json!({"prompt_tokens":100,"prompt_cache_hit_tokens":80})));
+		let full = serde_json::json!({"prompt_tokens":100,"completion_tokens":20,"total_tokens":120});
+		let mut tail = serde_json::json!({"usage":full});
+		capture_usage_tail(&mut usage, &mut tail, AdapterKind::OpenAI, true);
+		let parsed = usage.as_ref().unwrap();
+		assert_eq!(parsed.total_tokens, Some(120));
+		assert_eq!(parsed.prompt_tokens_details.as_ref().unwrap().cached_tokens, Some(80));
+
+		let mut tail = serde_json::json!({"usage":full});
+		tail["usage"]["prompt_tokens_details"] = serde_json::json!({"cached_tokens":0});
+		capture_usage_tail(&mut usage, &mut tail, AdapterKind::OpenAI, true);
+		assert!(usage.unwrap().prompt_tokens_details.is_none());
+	}
+
+	#[test]
+	fn test_usage_groq_accepts_native_and_standard_reports() {
+		let counts = serde_json::json!({"prompt_tokens":100,"completion_tokens":20,"total_tokens":120});
+		for mut stop in [serde_json::json!({"x_groq":{"usage": counts}}), serde_json::json!({"usage": counts})] {
+			let parsed = take_finish_reason_usage(&mut stop, AdapterKind::Groq, true).unwrap();
+			assert_eq!(parsed.total_tokens, Some(120));
+		}
+		let mut tail = serde_json::json!({"usage":counts});
+		let mut parsed = None;
+		capture_usage_tail(&mut parsed, &mut tail, AdapterKind::Groq, true);
+		assert_eq!(parsed.unwrap().total_tokens, Some(120));
 	}
 
 	#[test]

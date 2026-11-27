@@ -47,14 +47,19 @@ fn sse(deltas: &[(serde_json::Value, Option<&str>)]) -> String {
 
 /// Streams the frames and returns the events in order (without Start) and the end.
 async fn run(deltas: &[(serde_json::Value, Option<&str>)]) -> (Vec<ChatStreamEvent>, StreamEnd) {
-	let port = serve(sse(deltas));
+	run_stream(sse(deltas), AdapterKind::OpenAI).await
+}
+
+async fn run_stream(body: String, adapter: AdapterKind) -> (Vec<ChatStreamEvent>, StreamEnd) {
+	let port = serve(body);
 	let client = Client::builder().build().expect("client");
 	let target = ServiceTarget {
 		endpoint: Endpoint::from_owned(format!("http://127.0.0.1:{port}/v1/")),
 		auth: AuthData::Key("test".to_string()),
-		model: ModelIden::new(AdapterKind::OpenAI, "gpt-test"),
+		model: ModelIden::new(adapter, "test-model"),
 	};
 	let options = ChatOptions::default()
+		.with_capture_usage(true)
 		.with_capture_content(true)
 		.with_capture_reasoning_content(true)
 		.with_capture_tool_calls(true);
@@ -179,4 +184,32 @@ async fn content_next_to_tool_calls_is_kept() {
 
 	assert_eq!(end.captured_first_text(), Some("Checking."));
 	assert_eq!(captured_calls(&end).len(), 1);
+}
+
+#[tokio::test]
+async fn deepseek_cache_usage_survives_native_stop_and_gateway_tail() {
+	let usage = serde_json::json!({
+		"prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+		"prompt_cache_hit_tokens": 80, "prompt_cache_miss_tokens": 20
+	});
+	let stop = serde_json::json!({"choices": [{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]});
+	for adapter in [AdapterKind::DeepSeek, AdapterKind::OpenAI] {
+		let mut frame = stop.clone();
+		let mut body = String::new();
+		if adapter == AdapterKind::DeepSeek {
+			frame["usage"] = usage.clone();
+		} else {
+			frame["usage"] = serde_json::Value::Null;
+		}
+		body.push_str(&format!("data: {frame}\n\n"));
+		if adapter == AdapterKind::OpenAI {
+			let tail = serde_json::json!({"choices":[],"usage":usage});
+			body.push_str(&format!("data: {tail}\n\n"));
+		}
+		body.push_str("data: [DONE]\n\n");
+		let (_, end) = run_stream(body, adapter).await;
+		let counts = end.captured_usage.unwrap();
+		assert_eq!(counts.prompt_tokens_details.unwrap().cached_tokens, Some(80));
+		assert_eq!((counts.prompt_tokens, counts.completion_tokens, counts.total_tokens), (Some(100), Some(20), Some(120)));
+	}
 }

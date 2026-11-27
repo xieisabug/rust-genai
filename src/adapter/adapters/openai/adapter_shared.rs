@@ -277,26 +277,38 @@ impl OpenAIAdapter {
 			return Usage::default();
 		}
 
+		// DeepSeek exposes the same cache hit count at two paths. Some relays
+		// forward only the top-level field. An explicit nested zero wins too.
+		let cache_hits = if usage_value.pointer("/prompt_tokens_details/cached_tokens").is_none_or(Value::is_null) {
+			usage_value.get("prompt_cache_hit_tokens").and_then(Value::as_u64)
+				.and_then(|n| i32::try_from(n).ok()).filter(|n| *n > 0)
+		} else {
+			None
+		};
+
 		// NOTE: here we make sure we do not fail since we do not want to break a response because usage parsing fail
 		let usage = serde_json::from_value(usage_value).map_err(|err| {
 			error!("Fail to deserialize usage. Cause: {err}");
 			err
 		});
 		let mut usage: Usage = usage.unwrap_or_default();
+		if let Some(hits) = cache_hits {
+			usage.prompt_tokens_details.get_or_insert_with(Default::default).cached_tokens = Some(hits);
+		}
 		// Will set details to None if no values
 		usage.compact_details();
 
-		// Unfortunately, xAI grok-3 does not compute reasoning tokens correctly.
-		// Example: completion_tokens: 35, completion_tokens_details.reasoning_tokens: 192
-		// BUT completion_tokens should be 35 + 192.
-		// TODO: We might want to do this for other token details as well.
-		// TODO: We could check if the math adds up first with the total token count, and only change it if it does not.
-		//       This will allow us to be forward compatible if/when they fix this bug (yes, it is a bug).
+		// xAI reports visible output separately from reasoning. A gateway can
+		// already include reasoning in completion_tokens, as shown by its total.
 		if matches!(adapter, AdapterKind::Xai)
-			&& let Some(reasoning_tokens) = usage.completion_tokens_details.as_ref().and_then(|d| d.reasoning_tokens)
+			&& let Some(reasoning) = usage.completion_tokens_details.as_ref().and_then(|d| d.reasoning_tokens)
 		{
-			let completion_tokens = usage.completion_tokens.unwrap_or(0);
-			usage.completion_tokens = Some(completion_tokens + reasoning_tokens)
+			let output = usage.completion_tokens.unwrap_or(0);
+			let inclusive = usage.prompt_tokens.zip(usage.total_tokens)
+				.is_some_and(|(input, total)| input.checked_add(output) == Some(total));
+			if !inclusive {
+				usage.completion_tokens = Some(output.saturating_add(reasoning));
+			}
 		}
 
 		usage
